@@ -1,0 +1,43 @@
+{
+  "name": "warehouse-management-frontend",
+  "version": "1.0.0",
+  "description": "Warehouse Management System Frontend",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore",
+    "format": "prettier --write src/",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage"
+  },
+  "dependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "ant-design-vue": "4.1.2",
+    "axios": "^1.6.0",
+    "dayjs": "^1.11.0",
+    "pinia": "^2.1.0",
+    "vue": "^3.3.0",
+    "vue-i18n": "^9.14.5",
+    "vue-router": "^4.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vitejs/plugin-vue": "^4.5.0",
+    "@vitest/ui": "^1.0.0",
+    "@vue/test-utils": "^2.4.0",
+    "@vue/tsconfig": "^0.4.0",
+    "eslint": "^8.55.0",
+    "eslint-plugin-vue": "^9.19.0",
+    "happy-dom": "^12.10.0",
+    "prettier": "^3.1.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.4.21",
+    "vitest": "^1.0.0",
+    "vue-tsc": "^1.8.0"
+  }
+}
