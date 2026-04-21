@@ -13,7 +13,6 @@ namespace WarehouseManagementSystem.Services
         public const string IOProcessorEnabled = "IOProcessorEnabled";
         public const string PlcCommunicationEnabled = "PlcCommunicationEnabled";
         public const string ApiTaskProcessorEnabled = "ApiTaskProcessorEnabled";
-        public const string RcsWmsSafetyRetryEnabled = "RcsWmsSafetyRetryEnabled";
     }
 
     public interface IServiceToggleService
@@ -41,8 +40,7 @@ namespace WarehouseManagementSystem.Services
                 ["Language"] = ("zh-CN", "系统语言"),
                 [ServiceSettingKeys.IOProcessorEnabled] = ("true", "是否启用 IO 服务"),
                 [ServiceSettingKeys.PlcCommunicationEnabled] = ("true", "是否启用 PLC 服务（含通讯、任务处理、心跳）"),
-                [ServiceSettingKeys.ApiTaskProcessorEnabled] = ("true", "是否启用接口任务处理服务"),
-                [ServiceSettingKeys.RcsWmsSafetyRetryEnabled] = ("true", "是否启用 WMS 安全信号自动重试服务")
+                [ServiceSettingKeys.ApiTaskProcessorEnabled] = ("true", "是否启用接口任务处理服务")
             };
 
         private readonly IDatabaseService _databaseService;

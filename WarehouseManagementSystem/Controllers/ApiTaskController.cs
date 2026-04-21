@@ -2,9 +2,10 @@ using WarehouseManagementSystem.Models.Ndc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WarehouseManagementSystem.Models;
-using WarehouseManagementSystem.Services;
-using WarehouseManagementSystem.Data;
 using Dapper;
+using WarehouseManagementSystem.Models.Enums;
+using WarehouseManagementSystem.Services.Tasks;
+using WarehouseManagementSystem.Db;
 
 namespace WarehouseManagementSystem.Controllers
 {
@@ -18,25 +19,25 @@ namespace WarehouseManagementSystem.Controllers
         private readonly ITaskService _taskService;
         private readonly ILocationService _locationService;
         private readonly ILogger<ApiTaskController> _logger;
-        private readonly ApplicationDbContext _context;
+        private readonly IDatabaseService _db;
 
         public ApiTaskController(
             ITaskService taskService,
             ILocationService locationService,
             ILogger<ApiTaskController> logger,
-            ApplicationDbContext context)
+            IDatabaseService db)
         {
             _taskService = taskService;
             _locationService = locationService;
             _logger = logger;
-            _context = context;
+            _db = db;
         }
 
         private async Task<string> GetSystemTypeAsync()
         {
             try
             {
-                using var connection = _context.GetConnection();
+                using var connection = _db.CreateConnection();
                 var type = await connection.QueryFirstOrDefaultAsync<string>(
                     "SELECT Value FROM SystemSettings WHERE [Key] = 'SystemType'");
                 return type ?? "Heartbeat";

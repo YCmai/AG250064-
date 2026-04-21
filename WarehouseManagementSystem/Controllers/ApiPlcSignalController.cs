@@ -6,6 +6,9 @@ namespace WarehouseManagementSystem.Controllers
 {
     [ApiController]
     [Route("api/plcsignal")]
+    /// <summary>
+    /// PLC 信号配置接口：设备与信号的增删改查。
+    /// </summary>
     public class ApiPlcSignalController : ControllerBase
     {
         private readonly IPlcSignalService _plcSignalService;
@@ -20,6 +23,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet]
+        /// <summary>
+        /// 获取全部 PLC 设备。
+        /// </summary>
         public async Task<IActionResult> GetAllDevices()
         {
             try
@@ -35,6 +41,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("{id}")]
+        /// <summary>
+        /// 根据设备 ID 获取 PLC 设备详情。
+        /// </summary>
         public async Task<IActionResult> GetDeviceById(int id)
         {
             try
@@ -52,6 +61,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("signals/{deviceId}")]
+        /// <summary>
+        /// 获取指定设备的信号定义，可按 DB 块过滤。
+        /// </summary>
         public async Task<IActionResult> GetSignalsByDevice(string deviceId, [FromQuery] string dbBlock = null)
         {
             try
@@ -67,6 +79,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("signal/{id}")]
+        /// <summary>
+        /// 根据信号 ID 获取信号详情。
+        /// </summary>
         public async Task<IActionResult> GetSignalById(int id)
         {
             try
@@ -84,6 +99,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("device")]
+        /// <summary>
+        /// 新增 PLC 设备。
+        /// </summary>
         public async Task<IActionResult> AddDevice([FromBody] RCS_PlcDevice device)
         {
             try
@@ -108,6 +126,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("signal")]
+        /// <summary>
+        /// 新增 PLC 信号定义。
+        /// </summary>
         public async Task<IActionResult> AddSignal([FromBody] RCS_PlcSignal signal)
         {
             try
@@ -129,6 +150,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPut("{id}")]
+        /// <summary>
+        /// 更新 PLC 设备信息。
+        /// </summary>
         public async Task<IActionResult> UpdateDevice(int id, [FromBody] RCS_PlcDevice device)
         {
             try
@@ -147,6 +171,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPut("signal/{id}")]
+        /// <summary>
+        /// 更新 PLC 信号定义。
+        /// </summary>
         public async Task<IActionResult> UpdateSignal(int id, [FromBody] RCS_PlcSignal signal)
         {
             try

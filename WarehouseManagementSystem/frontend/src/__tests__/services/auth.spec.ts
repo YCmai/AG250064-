@@ -91,6 +91,7 @@ describe('Auth Service', () => {
         displayName: 'Test User',
         email: 'test@example.com',
         isActive: true,
+        permissions: [],
       }
 
       const mockResponse = {

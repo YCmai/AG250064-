@@ -38,6 +38,9 @@ public class NdcLocation : NdcEntityBase<int>
     /// <summary>是否锁定 (1: 锁定, 0: 解锁)</summary>
     public bool Lock { get; set; }
 
+    /// <summary>是否启用 (1: 启用, 0: 禁用)</summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>等待节点/排队点地标</summary>
     public string? WattingNode { get; set; }
 

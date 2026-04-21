@@ -5,8 +5,10 @@ export enum HeartbeatTaskType {
 }
 
 export enum NdcTaskType {
-  Transport = 1,
-  Charge = 2
+  In = 1,
+  Out = 2,
+  ParentPallet = 3,
+  Transfer = 4
 }
 
 export const HeartbeatTaskTypeMap: Record<number, string> = {
@@ -16,8 +18,10 @@ export const HeartbeatTaskTypeMap: Record<number, string> = {
 };
 
 export const NdcTaskTypeMap: Record<number, string> = {
-  [NdcTaskType.Transport]: '搬运',
-  [NdcTaskType.Charge]: '充电'
+  [NdcTaskType.In]: '入库',
+  [NdcTaskType.Out]: '出库',
+  [NdcTaskType.ParentPallet]: '母托盘',
+  [NdcTaskType.Transfer]: '搬运'
 };
 
 export const getTaskTypeInfo = (type: number, systemType: 'Heartbeat' | 'NDC') => {

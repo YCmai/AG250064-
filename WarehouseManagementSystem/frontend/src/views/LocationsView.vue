@@ -119,6 +119,12 @@
             </a-button>
             <a-button
               size="small"
+              @click.stop="handleToggleEnabled(record)"
+            >
+              {{ record.enabled ? $t('location.disable') : $t('location.enable') }}
+            </a-button>
+            <a-button
+              size="small"
               danger
               @click.stop="handleDeleteLocation(record)"
             >
@@ -262,7 +268,7 @@ const columns = computed(() => [
   {
     title: t('common.operation'),
     key: 'action',
-    width: 280,
+    width: 360,
     fixed: 'right',
   },
 ])
@@ -345,6 +351,20 @@ const handleToggleLock = async (record: Location) => {
     if (response.success) {
       message.success(response.message || t('common.success'))
       // 立即刷新数据
+      await fetchLocations()
+    } else {
+      message.error(response.message || t('common.fail'))
+    }
+  } catch (error: any) {
+    message.error(error.message || t('common.fail'))
+  }
+}
+
+const handleToggleEnabled = async (record: Location) => {
+  try {
+    const response = await locationService.toggleEnabled(record.id, !record.enabled)
+    if (response.success) {
+      message.success(response.message || t('common.success'))
       await fetchLocations()
     } else {
       message.error(response.message || t('common.fail'))

@@ -1,1 +1,0 @@
-import{x as o}from"./index-DBioPen8.js";const r={login:t=>o.post("/auth/login",t),logout:()=>o.post("/auth/logout"),getProfile:()=>o.get("/auth/profile"),refreshToken:()=>o.post("/auth/refresh-token")};export{r as a};

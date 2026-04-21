@@ -15,6 +15,12 @@ export interface ConnectionSettings {
   username?: string;
 }
 
+export interface NdcStatus {
+  systemType: string;
+  visible: boolean;
+  connected: boolean;
+}
+
 const unwrapPayload = <T = any>(response: any): T => {
   if (response && response.data !== undefined) {
     return response.data as T;
@@ -71,6 +77,11 @@ export const settingService = {
     return unwrapPayload(response);
   },
 
+  getNdcStatus: async (): Promise<NdcStatus> => {
+    const response = await api.get('/setting/ndc-status');
+    return unwrapPayload<NdcStatus>(response);
+  },
+
   testDatabaseConnection: async (settings: ConnectionSettings): Promise<boolean> => {
     const response = await api.post('/setting/test-connection', settings);
     return unwrapPayload<boolean>(response);
@@ -78,7 +89,7 @@ export const settingService = {
 
   backupDatabase: async (): Promise<{ success: boolean; message: string; path: string }> => {
     const response = await api.post('/setting/backup');
-    return response;
+    return unwrapPayload<{ success: boolean; message: string; path: string }>(response);
   },
 
   exportSettings: async (): Promise<Blob> => {

@@ -2,7 +2,7 @@ using WarehouseManagementSystem.Models.Ndc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WarehouseManagementSystem.Models;
-using WarehouseManagementSystem.Services;
+using WarehouseManagementSystem.Services.Tasks;
 
 namespace WarehouseManagementSystem.Controllers
 {
@@ -59,6 +59,7 @@ namespace WarehouseManagementSystem.Controllers
                     PalletID = l.PalletID,
                     IsEmpty = string.IsNullOrEmpty(l.MaterialCode) || l.MaterialCode == "0",
                     Lock = l.Lock,
+                    Enabled = l.Enabled,
                     
                     Weight = l.Weight,
                     Quanitity = l.Quanitity,
@@ -111,6 +112,7 @@ namespace WarehouseManagementSystem.Controllers
                     PalletID = location.PalletID,
                     IsEmpty = string.IsNullOrEmpty(location.MaterialCode) || location.MaterialCode == "0",
                     Lock = location.Lock,
+                    Enabled = location.Enabled,
                     
                     Weight = location.Weight,
                     Quanitity = location.Quanitity,
@@ -160,6 +162,7 @@ namespace WarehouseManagementSystem.Controllers
                     UnloadHeight = request.UnloadHeight ?? 0,
                     // 
                     Lock = request.Lock ?? false,
+                    Enabled = request.Enabled ?? true,
                     // 
                     MaterialCode = request.MaterialCode,
                     PalletID = request.PalletID ?? "0",
@@ -226,6 +229,8 @@ namespace WarehouseManagementSystem.Controllers
                 
                 if (request.Lock.HasValue)
                     location.Lock = request.Lock.Value;
+                if (request.Enabled.HasValue)
+                    location.Enabled = request.Enabled.Value;
                 
                 if (request.MaterialCode != null)
                     location.MaterialCode = request.MaterialCode;
@@ -360,6 +365,46 @@ namespace WarehouseManagementSystem.Controllers
             {
                 _logger.LogError(ex, $"切换储位锁定状态失败: ID={id}");
                 return StatusCode(500, ApiResponseHelper.Failure("切换储位锁定状态失败"));
+            }
+        }
+
+        /// <summary>
+        /// 启用/禁用储位
+        /// </summary>
+        /// <param name="id">储位ID</param>
+        /// <param name="request">启用状态请求</param>
+        /// <returns>操作结果</returns>
+        [HttpPost("{id}/toggle-enabled")]
+        public async Task<ActionResult<ApiResponse>> ToggleEnabled(int id, [FromBody] ToggleEnabledRequest request)
+        {
+            _logger.LogInformation($"切换储位启用状态: ID={id}, 启用={request.EnabledState}");
+
+            try
+            {
+                var location = await _locationService.GetLocationById(id);
+                if (location == null)
+                {
+                    return NotFound(ApiResponseHelper.Failure("储位不存在"));
+                }
+
+                if (location.Enabled == request.EnabledState)
+                {
+                    return Ok(ApiResponseHelper.Success($"储位已经是{(request.EnabledState ? "启用" : "禁用")}状态"));
+                }
+
+                var (success, message) = await _locationService.HandleLocationOperation(id, 5, request.EnabledState);
+                if (!success)
+                {
+                    return BadRequest(ApiResponseHelper.Failure(message));
+                }
+
+                _logger.LogInformation($"储位启用状态切换成功: ID={id}");
+                return Ok(ApiResponseHelper.Success(message));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, $"切换储位启用状态失败: ID={id}");
+                return StatusCode(500, ApiResponseHelper.Failure("切换储位启用状态失败"));
             }
         }
 
@@ -502,6 +547,7 @@ namespace WarehouseManagementSystem.Controllers
                             LiftingHeight = locationData.LiftingHeight ?? 0,
                             UnloadHeight = locationData.UnloadHeight ?? 0,
                             Lock = locationData.Lock ?? false,
+                            Enabled = locationData.Enabled ?? true,
                             MaterialCode = locationData.MaterialCode,
                             PalletID = locationData.PalletID ?? "0",
                             Weight = locationData.Weight ?? "0",
@@ -735,6 +781,7 @@ namespace WarehouseManagementSystem.Controllers
         public string WattingNode { get; set; }
         public bool IsEmpty { get; set; }
         public bool Lock { get; set; }
+        public bool Enabled { get; set; }
         
         
     }
@@ -752,6 +799,7 @@ namespace WarehouseManagementSystem.Controllers
         public int? UnloadHeight { get; set; }
         
         public bool? Lock { get; set; }
+        public bool? Enabled { get; set; }
         
         public string? MaterialCode { get; set; }
         public string? PalletID { get; set; }
@@ -782,6 +830,7 @@ namespace WarehouseManagementSystem.Controllers
         public int? UnloadHeight { get; set; }
         
         public bool? Lock { get; set; }
+        public bool? Enabled { get; set; }
         
         public string? MaterialCode { get; set; }
         public string? PalletID { get; set; }
@@ -799,6 +848,17 @@ namespace WarehouseManagementSystem.Controllers
         /// 是否锁定
         /// </summary>
         public bool LockState { get; set; }
+    }
+
+    /// <summary>
+    /// 启用状态请求
+    /// </summary>
+    public class ToggleEnabledRequest
+    {
+        /// <summary>
+        /// 是否启用
+        /// </summary>
+        public bool EnabledState { get; set; }
     }
 
     /// <summary>
@@ -865,6 +925,7 @@ namespace WarehouseManagementSystem.Controllers
         public int? UnloadHeight { get; set; }
         
         public bool? Lock { get; set; }
+        public bool? Enabled { get; set; }
         
         public string? MaterialCode { get; set; }
         public string? PalletID { get; set; }

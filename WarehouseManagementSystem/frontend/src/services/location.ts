@@ -59,6 +59,9 @@ const locationService = {
   toggleLock: (id: number, lockState: boolean) =>
     api.post<ApiResponse<any>>(`/location/${id}/toggle-lock`, { lockState }),
 
+  toggleEnabled: (id: number, enabledState: boolean) =>
+    api.post<ApiResponse<any>>(`/location/${id}/toggle-enabled`, { enabledState }),
+
   batchClearMaterial: (ids: number[]) =>
     api.post<ApiResponse<{ successCount: number; failCount: number }>>(
       '/location/batch/clear-material',

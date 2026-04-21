@@ -27,14 +27,25 @@ export interface ApiResponse<T> {
 }
 
 const authService = {
-  login: (request: LoginRequest) =>
-    api.post<ApiResponse<LoginResponse>>('/auth/login', request),
+  login: async (request: LoginRequest): Promise<ApiResponse<LoginResponse>> => {
+    const response = await api.post<ApiResponse<LoginResponse>>('/auth/login', request)
+    return response as unknown as ApiResponse<LoginResponse>
+  },
 
-  logout: () => api.post<ApiResponse>('/auth/logout'),
+  logout: async (): Promise<ApiResponse<void>> => {
+    const response = await api.post<ApiResponse<void>>('/auth/logout')
+    return response as unknown as ApiResponse<void>
+  },
 
-  getProfile: () => api.get<ApiResponse<UserInfo>>('/auth/profile'),
+  getProfile: async (): Promise<ApiResponse<UserInfo>> => {
+    const response = await api.get<ApiResponse<UserInfo>>('/auth/profile')
+    return response as unknown as ApiResponse<UserInfo>
+  },
 
-  refreshToken: () => api.post<ApiResponse<{ token: string }>>('/auth/refresh-token'),
+  refreshToken: async (): Promise<ApiResponse<{ token: string }>> => {
+    const response = await api.post<ApiResponse<{ token: string }>>('/auth/refresh-token')
+    return response as unknown as ApiResponse<{ token: string }>
+  },
 }
 
 export default authService

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WarehouseManagementSystem.Models;
 using WarehouseManagementSystem.Services;
+using WarehouseManagementSystem.Services.Tasks;
 
 namespace WarehouseManagementSystem.Controllers
 {

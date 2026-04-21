@@ -6,6 +6,9 @@ namespace WarehouseManagementSystem.Controllers
 {
     [ApiController]
     [Route("api/usermanagement")]
+    /// <summary>
+    /// 用户与权限管理接口：用户维护、权限分配、密码重置、启停用。
+    /// </summary>
     public class ApiUserManagementController : ControllerBase
     {
         private readonly IUserManagementService _userManagementService;
@@ -56,37 +59,52 @@ namespace WarehouseManagementSystem.Controllers
 
         public class UserCreateRequest
         {
+            /// <summary>登录用户名。</summary>
             public string Username { get; set; }
+            /// <summary>明文密码（入参），服务端会进行哈希存储。</summary>
             public string Password { get; set; }
+            /// <summary>邮箱。</summary>
             public string Email { get; set; }
+            /// <summary>显示名称。</summary>
             public string DisplayName { get; set; }
+            /// <summary>是否管理员。</summary>
             public bool IsAdmin { get; set; }
         }
 
         public class UserUpdateRequest
         {
+            /// <summary>邮箱。</summary>
             public string Email { get; set; }
+            /// <summary>显示名称。</summary>
             public string DisplayName { get; set; }
+            /// <summary>是否管理员。</summary>
             public bool IsAdmin { get; set; }
+            /// <summary>是否启用。</summary>
             public bool IsActive { get; set; }
         }
 
         public class AssignPermissionsRequest
         {
+            /// <summary>目标权限 ID 集合。</summary>
             public int[] PermissionIds { get; set; }
         }
 
         public class ResetPasswordRequest
         {
+            /// <summary>新密码（入参）。</summary>
             public string NewPassword { get; set; }
         }
 
         public class ToggleStatusRequest
         {
+            /// <summary>目标启用状态。</summary>
             public bool IsActive { get; set; }
         }
 
         [HttpPost("user")]
+        /// <summary>
+        /// 创建用户（密码会在服务端哈希后保存）。
+        /// </summary>
         public async Task<IActionResult> CreateUser([FromBody] UserCreateRequest request)
         {
             try
@@ -118,6 +136,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPut("user/{id}")]
+        /// <summary>
+        /// 更新用户基本信息（邮箱、显示名、管理员标记）。
+        /// </summary>
         public async Task<IActionResult> UpdateUser(int id, [FromBody] UserUpdateRequest request)
         {
             try
@@ -129,10 +150,7 @@ namespace WarehouseManagementSystem.Controllers
                 user.Email = request.Email ?? user.Email;
                 user.DisplayName = request.DisplayName ?? user.DisplayName;
                 user.IsAdmin = request.IsAdmin;
-                // 注意：这里我们可能不想在普通更新中覆盖 IsActive，除非明确传了
-                // 但为了简单起见，且前端传了 isActive，我们可以更新它
-                // 或者我们可以决定这个接口只更新基本信息
-                
+                // 当前接口仅更新基础信息；启停用请走 toggle-status 接口。
                 var success = await _userManagementService.UpdateUserAsync(user);
                 if (success)
                     return Ok(new { success = true });
@@ -193,24 +211,27 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("user/{userId}/permissions")]
+        /// <summary>
+        /// 同步用户权限：前端传入目标集合，后端自动增量添加/移除。
+        /// </summary>
         public async Task<IActionResult> AssignPermissions(int userId, [FromBody] AssignPermissionsRequest request)
         {
             try
             {
                 int[] permissionIds = request.PermissionIds;
 
-                // 获取当前权限
+                // 读取当前权限，用于计算增量变化。
                 var currentPermissions = await _userManagementService.GetUserPermissionsAsync(userId);
                 var currentPermissionIds = currentPermissions.Select(p => p.Id).ToList();
 
-                // 添加新权限
+                // 添加新增权限。
                 var permissionsToAdd = permissionIds.Where(id => !currentPermissionIds.Contains(id)).ToList();
                 foreach (var permissionId in permissionsToAdd)
                 {
                     await _userManagementService.AssignPermissionAsync(userId, permissionId, userId);
                 }
 
-                // 移除取消的权限
+                // 移除被取消的权限。
                 var permissionsToRemove = currentPermissionIds.Where(id => !permissionIds.Contains(id)).ToList();
                 foreach (var permissionId in permissionsToRemove)
                 {
@@ -227,6 +248,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPut("user/{id}/reset-password")]
+        /// <summary>
+        /// 重置用户密码（服务端哈希后写入）。
+        /// </summary>
         public async Task<IActionResult> ResetPassword(int id, [FromBody] ResetPasswordRequest request)
         {
             try
@@ -253,6 +277,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("user/{userId}/toggle-status")]
+        /// <summary>
+        /// 启用或停用指定用户账号。
+        /// </summary>
         public async Task<IActionResult> ToggleUserStatus(int userId, [FromBody] ToggleStatusRequest request)
         {
             try

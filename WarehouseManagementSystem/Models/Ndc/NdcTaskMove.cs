@@ -1,5 +1,5 @@
-using WarehouseManagementSystem.Shared.Ndc;
-using NdcTaskStatuEnum = WarehouseManagementSystem.Shared.Ndc.TaskStatuEnum;
+using WarehouseManagementSystem.Models.Enums;
+using NdcTaskStatuEnum = WarehouseManagementSystem.Models.Enums.TaskStatuEnum;
 
 namespace WarehouseManagementSystem.Models.Ndc;
 

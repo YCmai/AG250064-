@@ -1,20 +1,20 @@
-using System.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.ResponseCompression;
-using Microsoft.Data.SqlClient;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using Serilog.Events;
-using WarehouseManagementSystem.Data;
 using WarehouseManagementSystem.Db;
-using WarehouseManagementSystem.Infrastructure.Ndc;
 using WarehouseManagementSystem.Service.Io;
 using WarehouseManagementSystem.Service.Plc;
 using WarehouseManagementSystem.Services;
+using WarehouseManagementSystem.Infrastructure.Ndc;
 using WarehouseManagementSystem.Services.Ndc;
 using WarehouseManagementSystem.Services.Rcs;
-using WarehouseManagementSystem.Shared.Ndc;
+using WarehouseManagementSystem.Services.Integrations;
+using WarehouseManagementSystem.Services.Integrations.Hosted;
+using WarehouseManagementSystem.Models.Enums;
+using WarehouseManagementSystem.Services.Tasks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -54,41 +54,30 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
-builder.Services.AddScoped<ApplicationDbContext>();
-builder.Services.AddScoped<IDbConnection>(sp =>
-{
-    var configuration = sp.GetRequiredService<IConfiguration>();
-    var connectionString = configuration.GetConnectionString("DefaultConnection");
-    return new SqlConnection(connectionString);
-});
-
 builder.Services.AddScoped<ILocationService, LocationService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddSingleton<IDatabaseService, DatabaseService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
+// NDC/RCS 迁移期的数据访问适配层，当前统一走 IDatabaseService + Dapper。
 builder.Services.AddScoped(typeof(IEntityRepository<>), typeof(DapperEntityRepository<>));
+// NDC 对接服务。
 builder.Services.AddSingleton<AciAppManager>();
 builder.Services.AddScoped<IAciTaskDataService, AciTaskDataService>();
 builder.Services.AddScoped<IAciLocationDataService, AciLocationDataService>();
 builder.Services.AddScoped<IAciInteractionDataService, AciInteractionDataService>();
+
 builder.Services.AddScoped<AciDataEventHandler>();
-builder.Services.AddHostedService<AciConnectionHostedService>();
-builder.Services.AddHostedService<AciSendTaskHostedService>();
 builder.Services.AddSingleton<IGroupMaxTaskCountCategory, DefaultGroupMaxTaskCountCategory>();
 builder.Services.AddScoped<IRcsUserTaskService, RcsUserTaskService>();
 builder.Services.AddScoped<IRcsNdcTaskService, RcsNdcTaskService>();
 builder.Services.AddScoped<IRcsLocationService, RcsLocationService>();
 builder.Services.AddScoped<IRcsInteractionService, RcsInteractionService>();
-builder.Services.Configure<RcsWmsOptions>(builder.Configuration.GetSection(RcsWmsOptions.SectionName));
-// WMS 交互统一入口：业务层只需要注入 IRcsWmsService。
-builder.Services.AddHttpClient<IRcsWmsService, RcsWmsService>((sp, client) =>
-{
-    var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RcsWmsOptions>>().Value;
-    client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
-});
 
 builder.Services.AddSingleton<IServiceToggleService, ServiceToggleService>();
+builder.Services.AddSingleton<IAgvIntegrationService, AgvIntegrationService>();
+builder.Services.AddScoped<IAgvOutboundQueueRepository, AgvOutboundQueueRepository>();
+builder.Services.AddScoped<IAgvOutboundInteractionService, AgvOutboundInteractionService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("Jwt:SecretKey is not configured.");
@@ -143,8 +132,12 @@ builder.Services.AddHostedService<PlcTaskProcessor>();
 builder.Services.AddHostedService<HeartbeatService>();
 
 builder.Services.AddHostedService<ApiTaskProcessorService>();
+builder.Services.AddHostedService<AgvCommandInboxProcessorService>();
+//接口反馈，安全信号，后台消费线程（每2秒扫一次）
+builder.Services.AddHostedService<AgvOutboundProcessorService>();
+// NDC/RCS 迁移后的后台服务。
+builder.Services.AddHostedService<AciSendTaskHostedService>();
 builder.Services.AddHostedService<RcsWmsTaskHostedService>();
-builder.Services.AddHostedService<RcsWmsSafetySignalRetryHostedService>();
 
 builder.Services.AddScoped<IMaterialService, MaterialService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -193,10 +186,6 @@ else
 
 var app = builder.Build();
 
-var configuredUrls = (Environment.GetEnvironmentVariable("ASPNETCORE_URLS") ?? string.Empty)
-    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-var hasHttpsEndpoint = configuredUrls.Any(url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
-
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler(errorApp =>
@@ -221,11 +210,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-if (hasHttpsEndpoint)
-{
-    app.UseHttpsRedirection();
-}
-
+app.UseHttpsRedirection();
 app.UseResponseCompression();
 app.UseStaticFiles(new StaticFileOptions
 {
@@ -244,3 +229,6 @@ app.MapControllers();
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+
+

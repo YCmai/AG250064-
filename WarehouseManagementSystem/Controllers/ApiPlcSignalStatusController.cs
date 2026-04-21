@@ -5,7 +5,7 @@ using WarehouseManagementSystem.Service.Plc;
 using WarehouseManagementSystem.Db;
 using Dapper;
 using WarehouseManagementSystem.Models;
-using WarehouseManagementSystem.Services;
+using WarehouseManagementSystem.Services.Tasks;
 
 namespace WarehouseManagementSystem.Controllers
 {

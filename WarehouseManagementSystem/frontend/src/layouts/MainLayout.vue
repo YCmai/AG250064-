@@ -24,11 +24,8 @@
           <a-menu-item key="/tasks" v-if="authStore.hasPermission('TASK_MANAGEMENT')">
             {{ t('menu.tasks') }}
           </a-menu-item>
-          <a-menu-item key="/external/workorders">
-            外部工单
-          </a-menu-item>
-          <a-menu-item key="/external/agv-commands">
-            AGV指令
+          <a-menu-item key="/integration-data" v-if="authStore.hasPermission('TASK_MANAGEMENT') || authStore.hasPermission('LOCATION_MANAGEMENT')">
+            {{ t('menu.integrationData') }}
           </a-menu-item>
         </a-sub-menu>
 
@@ -83,19 +80,27 @@
           </a-dropdown>
         </div>
       </a-layout-header>
-      <a-layout-content class="content">
+      <a-layout-content class="content content-with-footer">
         <router-view />
       </a-layout-content>
+      <footer class="ndc-footer">
+        <div class="ndc-footer-card" :class="ndcConnected ? 'is-connected' : 'is-disconnected'">
+          <span class="status-dot" :class="ndcConnected ? 'connected' : 'disconnected'"></span>
+          <span class="ndc-footer-label">{{ t('settings.ndcConnectionStatus') }}</span>
+          <strong class="ndc-footer-value">{{ ndcConnected ? t('settings.connected') : t('settings.disconnected') }}</strong>
+        </div>
+      </footer>
     </a-layout>
   </a-layout>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import authService from '@/services/auth'
+import { settingService } from '@/services/setting'
 import {
   DashboardOutlined,
   AppstoreOutlined,
@@ -112,6 +117,8 @@ const authStore = useAuthStore()
 const settingStore = useSettingStore()
 const { useToken } = theme
 const { token } = useToken()
+const ndcConnected = ref(false)
+let ndcStatusTimer: number | null = null
 
 const activeKey = computed(() => route.path)
 const menuTheme = computed(() => (settingStore.currentTheme === 'dark' ? 'dark' : 'light'))
@@ -141,6 +148,40 @@ const handleProfileClick = async (e: any) => {
     }
   }
 }
+
+const fetchNdcStatus = async () => {
+  if (settingStore.systemType !== 'NDC') {
+    ndcConnected.value = false
+    return
+  }
+
+  try {
+    const status = await settingService.getNdcStatus()
+    ndcConnected.value = !!status.connected
+  } catch (error) {
+    ndcConnected.value = false
+    console.error('Fetch NDC status failed:', error)
+  }
+}
+
+onMounted(() => {
+  fetchNdcStatus()
+  ndcStatusTimer = window.setInterval(fetchNdcStatus, 5000)
+})
+
+watch(
+  () => settingStore.systemType,
+  () => {
+    fetchNdcStatus()
+  }
+)
+
+onBeforeUnmount(() => {
+  if (ndcStatusTimer !== null) {
+    window.clearInterval(ndcStatusTimer)
+    ndcStatusTimer = null
+  }
+})
 </script>
 
 <style scoped>
@@ -185,5 +226,62 @@ const handleProfileClick = async (e: any) => {
   padding: 24px;
   background: v-bind('token.colorBgLayout');
   min-height: calc(100vh - 64px);
+}
+
+.content-with-footer {
+  min-height: calc(100vh - 120px);
+}
+
+.ndc-footer {
+  padding: 0 24px 20px;
+  background: v-bind('token.colorBgLayout');
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ndc-footer-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 248, 248, 0.92));
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  color: #1f1f1f;
+}
+
+.ndc-footer-card.is-connected {
+  border-color: rgba(82, 196, 26, 0.25);
+}
+
+.ndc-footer-card.is-disconnected {
+  border-color: rgba(255, 77, 79, 0.22);
+}
+
+.ndc-footer-label {
+  color: #666;
+}
+
+.ndc-footer-value {
+  font-weight: 700;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.status-dot.connected {
+  background: #52c41a;
+  box-shadow: 0 0 8px rgba(82, 196, 26, 0.45);
+}
+
+.status-dot.disconnected {
+  background: #ff4d4f;
+  box-shadow: 0 0 8px rgba(255, 77, 79, 0.35);
 }
 </style>

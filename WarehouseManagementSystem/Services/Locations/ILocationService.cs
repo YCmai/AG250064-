@@ -2,7 +2,7 @@ using WarehouseManagementSystem.Models.Ndc;
 using System.Data;
 using WarehouseManagementSystem.Db;
 using Dapper;
-using WarehouseManagementSystem.Shared.Ndc;
+using WarehouseManagementSystem.Models.Enums;
 
 public interface ILocationService
 {
@@ -10,7 +10,7 @@ public interface ILocationService
     Task<(IEnumerable<NdcLocation> Items, int TotalCount)> GetSearchLocations(string searchString, int page, int pageSize);
     Task<NdcLocation> GetLocationById(int id);
     Task<(bool Success, string Message)> CreateOrUpdateLocation(NdcLocation location);
-    Task<(bool Success, string Message)> HandleLocationOperation(int id, int type);
+    Task<(bool Success, string Message)> HandleLocationOperation(int id, int type, bool? enabledState = null);
     Task<(int Available, int Used)> GetStorageCapacityStats();
     Task<(List<NdcLocation> Items, int TotalItems, int Available, int Used)> GetLocationsWithStats(string searchString = "", int page = 1);
 
@@ -96,12 +96,21 @@ public class LocationService : ILocationService
         try
         {
             var whereClause = string.IsNullOrEmpty(searchString) ? "" : "WHERE NodeRemark LIKE @Search OR MaterialCode LIKE @Search OR Name LIKE @Search";
+            var parameters = new
+            {
+                Search = $"%{searchString}%",
+                Offset = (page - 1) * pageSize,
+                PageSize = pageSize
+            };
             var countSql = $"SELECT COUNT(*) FROM RCS_Locations {whereClause}";
-            var totalCount = await connection.ExecuteScalarAsync<int>(countSql, new { Search = $"%{searchString}%" });
-            var sql = $@"SELECT * FROM RCS_Locations {whereClause}";
-            var items = await connection.QueryAsync<NdcLocation>(sql, new { Search = $"%{searchString}%" });
-            var result = items.Skip((page - 1) * pageSize).Take(pageSize);
-            return (result, totalCount);
+            var totalCount = await connection.ExecuteScalarAsync<int>(countSql, parameters);
+            var sql = $@"
+SELECT * FROM RCS_Locations
+{whereClause}
+ORDER BY [Group], [NodeRemark]
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY";
+            var items = await connection.QueryAsync<NdcLocation>(sql, parameters);
+            return (items, totalCount);
         }
         catch (Exception ex)
         {
@@ -115,14 +124,19 @@ public class LocationService : ILocationService
         try
         {
             using var conn = _db.CreateConnection();
-            var allItems = await conn.QueryAsync<NdcLocation>("SELECT * FROM RCS_Locations");
-            var filtered = allItems.ToList();
-            if (!string.IsNullOrEmpty(searchString))
+            var whereClause = string.IsNullOrWhiteSpace(searchString) ? "" : "WHERE [NodeRemark] LIKE @Search";
+            var parameters = new
             {
-                filtered = filtered.Where(x => x.NodeRemark != null && x.NodeRemark.Contains(searchString)).ToList();
-            }
-            var totalItems = filtered.Count;
-            var items = filtered.OrderBy(x => x.Group).ThenBy(x => x.NodeRemark).Skip((page - 1) * pageSize).Take(pageSize).ToList();
+                Search = $"%{searchString}%",
+                Offset = (page - 1) * pageSize,
+                PageSize = pageSize
+            };
+            var totalItems = await conn.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM RCS_Locations {whereClause}", parameters);
+            var items = (await conn.QueryAsync<NdcLocation>($@"
+SELECT * FROM RCS_Locations
+{whereClause}
+ORDER BY [Group], [NodeRemark]
+OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY", parameters)).ToList();
             return (items, totalItems);
         }
         catch (Exception ex)
@@ -191,13 +205,13 @@ public class LocationService : ILocationService
             var existing = await conn.QueryFirstOrDefaultAsync<NdcLocation>("SELECT * FROM RCS_Locations WHERE NodeRemark = @NodeRemark", new { location.NodeRemark });
             if (existing != null)
             {
-                var sql = @"UPDATE RCS_Locations SET Name = @Name, NodeRemark = @NodeRemark, MaterialCode = @MaterialCode, PalletID = @PalletID, Weight = @Weight, Quanitity = @Quanitity, EntryDate = @EntryDate, [Group] = @Group, LiftingHeight = @LiftingHeight, Lock = @Lock, WattingNode = @WattingNode, UnloadHeight = @UnloadHeight WHERE NodeRemark = @NodeRemark";
+                var sql = @"UPDATE RCS_Locations SET Name = @Name, NodeRemark = @NodeRemark, MaterialCode = @MaterialCode, PalletID = @PalletID, Weight = @Weight, Quanitity = @Quanitity, EntryDate = @EntryDate, [Group] = @Group, LiftingHeight = @LiftingHeight, Lock = @Lock, Enabled = @Enabled, WattingNode = @WattingNode, UnloadHeight = @UnloadHeight WHERE NodeRemark = @NodeRemark";
                 await conn.ExecuteAsync(sql, location);
                 return (true, "修改成功");
             }
             else
             {
-                var sql = @"INSERT INTO RCS_Locations (Name, NodeRemark, MaterialCode, PalletID, Weight, Quanitity, EntryDate, [Group], LiftingHeight, Lock, WattingNode, UnloadHeight, CreatedTime) VALUES (@Name, @NodeRemark, @MaterialCode, @PalletID, @Weight, @Quanitity, @EntryDate, @Group, @LiftingHeight, @Lock, @WattingNode, @UnloadHeight, @CreatedTime)";
+                var sql = @"INSERT INTO RCS_Locations (Name, NodeRemark, MaterialCode, PalletID, Weight, Quanitity, EntryDate, [Group], LiftingHeight, Lock, Enabled, WattingNode, UnloadHeight, CreatedTime) VALUES (@Name, @NodeRemark, @MaterialCode, @PalletID, @Weight, @Quanitity, @EntryDate, @Group, @LiftingHeight, @Lock, @Enabled, @WattingNode, @UnloadHeight, @CreatedTime)";
                 await conn.ExecuteAsync(sql, location);
                 return (true, "新存储位置已成功创建！");
             }
@@ -209,7 +223,7 @@ public class LocationService : ILocationService
         }
     }
 
-    public async Task<(bool Success, string Message)> HandleLocationOperation(int id, int type)
+    public async Task<(bool Success, string Message)> HandleLocationOperation(int id, int type, bool? enabledState = null)
     {
         try
         {
@@ -234,6 +248,13 @@ public class LocationService : ILocationService
                         return (true, "异常物料重置成功！");
                     }
                     return (false, "该储位不包含异常物料！");
+                case 5: // 切换启用状态
+                    if (!enabledState.HasValue)
+                    {
+                        return (false, "缺少目标启用状态！");
+                    }
+                    await conn.ExecuteAsync("UPDATE RCS_Locations SET Enabled = @Enabled WHERE Id = @Id", new { Id = id, Enabled = enabledState.Value });
+                    return (true, enabledState.Value ? "储位启用成功！" : "储位禁用成功！");
                 default:
                     return (false, "无效的操作类型！");
             }

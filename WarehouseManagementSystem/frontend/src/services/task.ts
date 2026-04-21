@@ -58,7 +58,7 @@ const taskService = {
   getAvailableLocations: () =>
     api.get<ApiResponse<Array<{ id: number; name: string; nodeRemark: string; group: string; isEmpty: boolean }>>>('/task/available-locations'),
 
-  cancelTask: (id: number) => api.post<ApiResponse>(`/task/${id}/cancel`),
+  cancelTask: (id: number) => api.post<ApiResponse<void>>(`/task/${id}/cancel`),
 
   getTaskStatistics: () => api.get<ApiResponse<any>>('/task/statistics'),
 }

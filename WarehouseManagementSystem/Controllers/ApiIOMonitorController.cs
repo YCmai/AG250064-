@@ -6,6 +6,9 @@ namespace WarehouseManagementSystem.Controllers
 {
     [ApiController]
     [Route("api/iomonitor")]
+    /// <summary>
+    /// IO 监控相关接口：设备管理、信号读写、任务下发。
+    /// </summary>
     public class ApiIOMonitorController : ControllerBase
     {
         private readonly IIODeviceService _deviceService;
@@ -23,6 +26,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("devices")]
+        /// <summary>
+        /// 获取全部 IO 设备。
+        /// </summary>
         public async Task<IActionResult> GetAllDevices()
         {
             try
@@ -39,6 +45,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("signals")]
+        /// <summary>
+        /// 获取最新 IO 信号快照。
+        /// </summary>
         public async Task<IActionResult> GetLatestSignals()
         {
             try
@@ -54,6 +63,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("device")]
+        /// <summary>
+        /// 新增 IO 设备。
+        /// </summary>
         public async Task<IActionResult> AddDevice([FromBody] RCS_IODevices device)
         {
             try
@@ -84,6 +96,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("signal")]
+        /// <summary>
+        /// 新增 IO 信号定义。
+        /// </summary>
         public async Task<IActionResult> AddSignal([FromBody] RCS_IOSignals signal)
         {
             try
@@ -158,6 +173,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("device/{id}/toggle")]
+        /// <summary>
+        /// 启用/禁用指定 IO 设备。
+        /// </summary>
         public async Task<IActionResult> ToggleDevice(int id, [FromBody] System.Text.Json.JsonElement request)
         {
             try
@@ -167,6 +185,7 @@ namespace WarehouseManagementSystem.Controllers
                     return NotFound(new { success = false, message = "设备不存在" });
 
                 bool isEnabled;
+                // 兼容前端字段大小写：isEnabled / IsEnabled
                 if (request.TryGetProperty("isEnabled", out var isEnabledProp))
                 {
                     isEnabled = isEnabledProp.GetBoolean();
@@ -193,6 +212,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("signal/read")]
+        /// <summary>
+        /// 读取指定设备地址的信号值。
+        /// </summary>
         public async Task<IActionResult> ReadSignal([FromQuery] string ip, [FromQuery] string address)
         {
             try
@@ -222,6 +244,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("signal/write")]
+        /// <summary>
+        /// 写入信号（实际通过下发 IO 任务执行，避免 API 线程直接阻塞硬件通信）。
+        /// </summary>
         public async Task<IActionResult> WriteSignal([FromBody] WriteSignalRequest request)
         {
             try
@@ -252,6 +277,7 @@ namespace WarehouseManagementSystem.Controllers
                 _logger.LogInformation("正在创建写入信号任务: IP={IP}, Address={Address}, Value={Value}",
                     request.IP, addressEnum, request.Value);
 
+                // 统一走任务通道，便于重试、追踪和异步执行。
                 var taskId = await _ioService.AddIOTask(
                     taskType: "ArrivalNotify",
                     deviceIP: request.IP,
@@ -270,6 +296,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpGet("tasks")]
+        /// <summary>
+        /// 获取 IO 任务列表。
+        /// </summary>
         public async Task<IActionResult> GetIOTasks()
         {
             try
@@ -285,6 +314,9 @@ namespace WarehouseManagementSystem.Controllers
         }
 
         [HttpPost("task")]
+        /// <summary>
+        /// 手动新增 IO 任务。
+        /// </summary>
         public async Task<IActionResult> AddIOTask([FromBody] dynamic task)
         {
             try

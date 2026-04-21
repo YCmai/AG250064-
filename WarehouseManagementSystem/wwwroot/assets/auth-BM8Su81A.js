@@ -1,0 +1,1 @@
+import{D as s}from"./index-BWi3W7c-.js";const r={login:async e=>await s.post("/auth/login",e),logout:async()=>await s.post("/auth/logout"),getProfile:async()=>await s.get("/auth/profile"),refreshToken:async()=>await s.post("/auth/refresh-token")};export{r as a};

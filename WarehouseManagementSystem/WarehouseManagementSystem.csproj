@@ -46,26 +46,30 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Migrations\" />
-    <Folder Include="Tests\" />
+    <Compile Remove="bin\**\*.cs" />
+    <Compile Remove="Logs\**" />
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="codexobj\**\*.cs" />
+    <Compile Remove="codexbin\**\*.cs" />
+    <Compile Remove="build_verify\**\*.cs" />
+    <Compile Remove="Program.codex.backup.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="bin\**\*.cs" />
-    <Compile Remove="obj\**\*.cs" />
-    <Compile Remove="codexobj\**\*.cs" />
-    <Compile Remove="codexbuild\**\*" />
-    <Compile Remove="Program.codex.backup.cs" />
-    <Compile Remove="RCS\bin\**\*.cs" />
-    <Compile Remove="RCS\obj\**\*.cs" />
-    <Content Remove="codexbuild\**\*" />
-    <None Remove="codexbuild\**\*" />
-    <EmbeddedResource Remove="codexbuild\**\*" />
+    <Content Remove="codexbin\**" />
+    <Content Remove="build_verify\**" />
+    <Content Remove="Logs\**" />
+    <EmbeddedResource Remove="Logs\**" />
+    <None Remove="codexbin\**" />
+    <None Remove="build_verify\**" />
+    <None Remove="Logs\**" />
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="SuperPort">
-      <HintPath>NdcModule\bin\Debug\net6.0\SuperPort.dll</HintPath>
+      <HintPath Condition="Exists('NdcModule\bin\Debug\net6.0\SuperPort.dll')">NdcModule\bin\Debug\net6.0\SuperPort.dll</HintPath>
+      <HintPath Condition="!Exists('NdcModule\bin\Debug\net6.0\SuperPort.dll') and Exists('bin\Debug\net6.0\SuperPort.dll')">bin\Debug\net6.0\SuperPort.dll</HintPath>
+      <HintPath Condition="!Exists('NdcModule\bin\Debug\net6.0\SuperPort.dll') and !Exists('bin\Debug\net6.0\SuperPort.dll') and Exists('codexbin\Debug\net6.0\SuperPort.dll')">codexbin\Debug\net6.0\SuperPort.dll</HintPath>
     </Reference>
   </ItemGroup>
 

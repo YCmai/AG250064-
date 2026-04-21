@@ -2,8 +2,9 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WarehouseManagementSystem.Models.Ndc;
-using NdcTaskStatuEnum = WarehouseManagementSystem.Shared.Ndc.TaskStatuEnum;
-using NdcTaskTypeEnum = WarehouseManagementSystem.Shared.Ndc.TaskTypeEnum;
+using WarehouseManagementSystem.Services.Integrations;
+using NdcTaskStatuEnum = WarehouseManagementSystem.Models.Enums.TaskStatuEnum;
+using NdcTaskTypeEnum = WarehouseManagementSystem.Models.Enums.TaskTypeEnum;
 
 namespace WarehouseManagementSystem.Services.Rcs;
 
@@ -58,8 +59,7 @@ public class RcsWmsTaskHostedService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var dependencies = CreateDependencies(scope.ServiceProvider);
 
-        var cancelTasks = await dependencies.UserTaskService.GetTasksAsync(x =>
-            x.taskStatus < NdcTaskStatuEnum.TaskFinish && x.IsCancelled);
+        var cancelTasks = await dependencies.UserTaskService.GetCancelableTasksAsync();
 
         foreach (var cancelTask in cancelTasks)
         {
@@ -72,7 +72,7 @@ public class RcsWmsTaskHostedService : BackgroundService
         try
         {
             var reqCode = GetScheduleTaskNo(userTask);
-            var ndcTask = await dependencies.NdcTaskService.FindAsync(x => x.SchedulTaskNo == reqCode);
+            var ndcTask = await dependencies.NdcTaskService.FindByScheduleTaskNoAsync(reqCode);
 
             if (ndcTask != null)
             {
@@ -116,9 +116,7 @@ public class RcsWmsTaskHostedService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var dependencies = CreateDependencies(scope.ServiceProvider);
 
-        var userTasks = await dependencies.UserTaskService.GetTasksAsync(x =>
-            x.taskStatus != NdcTaskStatuEnum.Canceled &&
-            x.taskStatus != NdcTaskStatuEnum.TaskFinish);
+        var userTasks = await dependencies.UserTaskService.GetActiveTasksAsync();
 
         var distinctTasks = userTasks.GroupBy(x => x.Id).Select(x => x.First()).ToList();
         var requestCodes = distinctTasks
@@ -126,9 +124,7 @@ public class RcsWmsTaskHostedService : BackgroundService
             .Select(x => x.requestCode!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var ndcTasks = await dependencies.NdcTaskService.GetTasksAsync(x =>
-            !string.IsNullOrWhiteSpace(x.SchedulTaskNo) &&
-            requestCodes.Contains(x.SchedulTaskNo!));
+        var ndcTasks = await dependencies.NdcTaskService.GetByScheduleTaskNosAsync(requestCodes);
 
         foreach (var userTask in distinctTasks)
         {
@@ -145,7 +141,7 @@ public class RcsWmsTaskHostedService : BackgroundService
 
             if (ndcTask.TaskStatus == NdcTaskStatuEnum.TaskFinish)
             {
-                await HandleTaskFinishAsync(userTask, dependencies);
+                await UnlockTaskLocationsAsync(userTask, dependencies);
             }
             else if (ndcTask.TaskStatus == NdcTaskStatuEnum.Canceled ||
                      ndcTask.TaskStatus == NdcTaskStatuEnum.RedirectRequest)
@@ -154,48 +150,24 @@ public class RcsWmsTaskHostedService : BackgroundService
             }
 
             await dependencies.UserTaskService.UpdateAsync(userTask);
+            await TryTriggerUpstreamInteractionsAsync(userTask, ndcTask.TaskStatus, dependencies);
         }
     }
 
-    /// <summary>
-    /// 任务完成后的库位和物料信息更新
-    /// </summary>
-    private async Task HandleTaskFinishAsync(NdcUserTask userTask, RcsScopedDependencies dependencies)
-    {
-        var sourceLocation = await dependencies.LocationService.FindAsync(x => x.NodeRemark == userTask.sourcePosition);
-        var targetLocation = await dependencies.LocationService.FindAsync(x => x.NodeRemark == userTask.targetPosition);
-
-        _logger.LogInformation("任务 {RequestCode} 执行完成处理库位信息. 源:{Source}, 目标:{Target}", 
-            userTask.requestCode, userTask.sourcePosition, userTask.targetPosition);
-
-        if (sourceLocation != null)
-        {
-            sourceLocation.Lock = false;
-            if (userTask.taskType == NdcTaskTypeEnum.ParentPallet)
-            {
-                sourceLocation.MaterialCode = null;
-            }
-            await dependencies.LocationService.UpdateAsync(sourceLocation);
-        }
-
-        if (targetLocation != null)
-        {
-            targetLocation.Lock = false;
-            if (userTask.taskType == NdcTaskTypeEnum.ParentPallet)
-            {
-                targetLocation.MaterialCode = "parent_pallet";
-            }
-            await dependencies.LocationService.UpdateAsync(targetLocation);
-        }
-    }
+ 
 
     /// <summary>
     /// 释放任务意外中断所占用的起终点库位锁
     /// </summary>
     private async Task UnlockTaskLocationsAsync(NdcUserTask userTask, RcsScopedDependencies dependencies)
     {
-        var sourceLocation = await dependencies.LocationService.FindAsync(x => x.NodeRemark == userTask.sourcePosition);
-        var targetLocation = await dependencies.LocationService.FindAsync(x => x.NodeRemark == userTask.targetPosition);
+        var locations = await dependencies.LocationService.GetByNodeRemarksAsync(new[]
+        {
+            userTask.sourcePosition,
+            userTask.targetPosition
+        });
+        var sourceLocation = locations.FirstOrDefault(x => x.NodeRemark == userTask.sourcePosition);
+        var targetLocation = locations.FirstOrDefault(x => x.NodeRemark == userTask.targetPosition);
 
         if (sourceLocation != null && sourceLocation.Lock)
         {
@@ -224,13 +196,11 @@ public class RcsWmsTaskHostedService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var dependencies = CreateDependencies(scope.ServiceProvider);
 
-        var pendingTasks = await dependencies.UserTaskService.GetTasksAsync(x => x.taskStatus == NdcTaskStatuEnum.None);
+        var pendingTasks = await dependencies.UserTaskService.GetPendingTasksAsync();
         if (!pendingTasks.Any()) return;
 
         var locations = await dependencies.LocationService.GetAllAsync();
-        var unfinishedNdcTasks = await dependencies.NdcTaskService.GetTasksAsync(x =>
-            x.TaskStatus != NdcTaskStatuEnum.TaskFinish &&
-            x.TaskStatus != NdcTaskStatuEnum.Canceled);
+        var unfinishedNdcTasks = await dependencies.NdcTaskService.GetUnfinishedTasksAsync();
 
         foreach (var task in pendingTasks
                      .OrderBy(x => x.priority ?? int.MaxValue)
@@ -262,7 +232,7 @@ public class RcsWmsTaskHostedService : BackgroundService
             return;
         }
 
-        var existingTask = await dependencies.NdcTaskService.FindAsync(x => x.SchedulTaskNo == reqCode);
+        var existingTask = await dependencies.NdcTaskService.FindByScheduleTaskNoAsync(reqCode);
         if (existingTask != null)
         {
             _logger.LogWarning("任务 {RequestCode} 的 NDC 执行记录已被意外创建，跳过重复下发", reqCode);
@@ -299,19 +269,102 @@ public class RcsWmsTaskHostedService : BackgroundService
 
     #region 工具辅助与信道聚合层
 
+    /// <summary>
+    /// 根据任务状态变化触发上位机主动交互。
+    /// 当前仅实现两个示例：
+    /// 1) 物料达到生产线信息（示例：入库任务进入卸货状态）
+    /// 2) 作业完成反馈（任务组全部进入终态后发送）
+    /// </summary>
+    private async Task TryTriggerUpstreamInteractionsAsync(
+        NdcUserTask userTask,
+        NdcTaskStatuEnum newStatus,
+        RcsScopedDependencies dependencies)
+    {
+        if (ShouldNotifyMaterialArrived(userTask, newStatus))
+        {
+            await dependencies.OutboundInteractionService.NotifyMaterialArrivedAsync(userTask);
+        }
+
+        var completedStatus = ConvertToJobCompletedStatus(newStatus);
+        if (!completedStatus.HasValue)
+        {
+            return;
+        }
+
+        var taskNumber = ResolveTaskNumber(userTask);
+        if (string.IsNullOrWhiteSpace(taskNumber))
+        {
+            _logger.LogWarning("跳过作业完成反馈：taskNumber为空，RequestCode={RequestCode}", userTask.requestCode);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(userTask.taskGroupNo))
+        {
+            var hasUnfinishedTasks = await dependencies.UserTaskService.ExistsUnfinishedTasksInGroupAsync(userTask.taskGroupNo);
+            if (hasUnfinishedTasks)
+            {
+                return;
+            }
+        }
+
+        await dependencies.OutboundInteractionService.NotifyJobCompletedAsync(taskNumber, completedStatus.Value);
+    }
+
+    /// <summary>
+    /// 物料达到生产线触发条件示例：入库类型任务进入卸货阶段时上报。
+    /// </summary>
+    private static bool ShouldNotifyMaterialArrived(NdcUserTask userTask, NdcTaskStatuEnum newStatus)
+    {
+        return userTask.taskType == NdcTaskTypeEnum.In && newStatus == NdcTaskStatuEnum.Unloading;
+    }
+
+    /// <summary>
+    /// 将内部任务终态映射为上位机“作业完成反馈”状态：
+    /// 1=完成，2=终止/取消。
+    /// </summary>
+    private static int? ConvertToJobCompletedStatus(NdcTaskStatuEnum status)
+    {
+        return status switch
+        {
+            NdcTaskStatuEnum.TaskFinish => 1,
+            NdcTaskStatuEnum.OrderAgvFinish => 1,
+            NdcTaskStatuEnum.Canceled => 2,
+            NdcTaskStatuEnum.CanceledWashFinish => 2,
+            NdcTaskStatuEnum.InvalidUp => 2,
+            NdcTaskStatuEnum.InvalidDown => 2,
+            NdcTaskStatuEnum.RedirectRequest => 2,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// 反馈任务号优先使用任务组号，缺失时回退 requestCode。
+    /// </summary>
+    private static string ResolveTaskNumber(NdcUserTask userTask)
+    {
+        if (!string.IsNullOrWhiteSpace(userTask.taskGroupNo))
+        {
+            return userTask.taskGroupNo.Trim();
+        }
+
+        return userTask.requestCode?.Trim() ?? string.Empty;
+    }
+
     private static string GetScheduleTaskNo(NdcUserTask userTask) => userTask.requestCode ?? string.Empty;
 
     private static RcsScopedDependencies CreateDependencies(IServiceProvider serviceProvider) => new(
         serviceProvider.GetRequiredService<IRcsUserTaskService>(),
         serviceProvider.GetRequiredService<IRcsNdcTaskService>(),
         serviceProvider.GetRequiredService<IRcsLocationService>(),
-        serviceProvider.GetRequiredService<IRcsInteractionService>());
+        serviceProvider.GetRequiredService<IRcsInteractionService>(),
+        serviceProvider.GetRequiredService<IAgvOutboundInteractionService>());
 
     private sealed record RcsScopedDependencies(
         IRcsUserTaskService UserTaskService,
         IRcsNdcTaskService NdcTaskService,
         IRcsLocationService LocationService,
-        IRcsInteractionService InteractionService);
+        IRcsInteractionService InteractionService,
+        IAgvOutboundInteractionService OutboundInteractionService);
 
     #endregion
 }

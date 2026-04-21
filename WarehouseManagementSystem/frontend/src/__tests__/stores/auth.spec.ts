@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 
@@ -33,6 +33,7 @@ describe('Auth Store', () => {
       displayName: 'Test User',
       email: 'test@example.com',
       isActive: true,
+      permissions: [],
     }
 
     authStore.setUser(testUser)
@@ -50,6 +51,7 @@ describe('Auth Store', () => {
       displayName: 'Test User',
       email: 'test@example.com',
       isActive: true,
+      permissions: [],
     }
 
     authStore.setToken(testToken)

@@ -1,7 +1,9 @@
 ﻿using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using WarehouseManagementSystem.Services;
+using WarehouseManagementSystem.Models.DTOs.Integrations;
+using WarehouseManagementSystem.Services.Integrations;
+using WarehouseManagementSystem.Services.Tasks;
 
 namespace WarehouseManagementSystem.Controllers
 {
@@ -14,10 +16,13 @@ namespace WarehouseManagementSystem.Controllers
     public class IntegrationController : ControllerBase
     {
         private readonly ILogger<IntegrationController> _logger;
+        private readonly IAgvIntegrationService _agvIntegrationService;
+        private const string DateTimeFormat = "yyyy-MM-dd HH:mm:ss";
 
-        public IntegrationController(ILogger<IntegrationController> logger)
+        public IntegrationController(ILogger<IntegrationController> logger, IAgvIntegrationService agvIntegrationService)
         {
             _logger = logger;
+            _agvIntegrationService = agvIntegrationService;
         }
 
         /// <summary>
@@ -158,6 +163,207 @@ namespace WarehouseManagementSystem.Controllers
                 TraceId = HttpContext.TraceIdentifier
             }, "状态查询成功"));
         }
+
+        /// <summary>
+        /// MES 下发工单信息给 AGV。
+        /// POST /api/ApiTask/workorder
+        /// </summary>
+        [HttpPost("/api/ApiTask/workorder")]
+        [HttpPost("agv/work-orders")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ReceiveAgvWorkOrder([FromBody] AgvWorkOrderRequest request, CancellationToken cancellationToken)
+        {
+            var errors = ValidateAgvWorkOrderRequest(request);
+            if (errors.Count > 0)
+            {
+                var errorMessage = string.Join("; ", errors);
+                _logger.LogWarning("AGV工单信息校验失败，Error={Error}, Payload={Payload}", errorMessage, request);
+                return Ok(AgvIntegrationResponse.Fail(errorMessage));
+            }
+
+            _logger.LogInformation(
+                "收到MES下发AGV工单信息，OrderNumber={OrderNumber}, MaterialNumber={MaterialNumber}, MsgType={MsgType}, ReceiveTime={ReceiveTime}",
+                request.OrderNumber,
+                request.MaterialNumber,
+                request.MsgType,
+                DateTime.Now.ToString(DateTimeFormat));
+
+            var persistResult = await _agvIntegrationService.SaveWorkOrderAsync(request, cancellationToken);
+            return persistResult.Status switch
+            {
+                AgvPersistStatus.Success => Ok(AgvIntegrationResponse.Success()),
+                AgvPersistStatus.Duplicate => Ok(AgvIntegrationResponse.Fail(
+                    string.IsNullOrWhiteSpace(persistResult.ErrorMsg) ? "工单已存在，禁止重复下发" : persistResult.ErrorMsg)),
+                AgvPersistStatus.Conflict => Ok(AgvIntegrationResponse.Fail(persistResult.ErrorMsg)),
+                _ => Ok(AgvIntegrationResponse.Fail(persistResult.ErrorMsg))
+            };
+        }
+
+        /// <summary>
+        /// MES 下发 AGV 指令。
+        /// POST /api/ApiTask/agvcommand
+        /// </summary>
+        [HttpPost("/api/ApiTask/agvcommand")]
+        [HttpPost("agv/commands")]
+        [AllowAnonymous]
+        public async Task<IActionResult> ReceiveAgvCommand([FromBody] AgvCommandRequest request, CancellationToken cancellationToken)
+        {
+            var errors = ValidateAgvCommandRequest(request);
+            if (errors.Count > 0)
+            {
+                var errorMessage = string.Join("; ", errors);
+                _logger.LogWarning("AGV指令校验失败，Error={Error}, Payload={Payload}", errorMessage, request);
+                return Ok(AgvIntegrationResponse.Fail(errorMessage));
+            }
+
+            _logger.LogInformation(
+                "收到MES下发AGV指令，TaskNumber={TaskNumber}, Priority={Priority}, ItemCount={ItemCount}, Items={Items}, Payload={Payload}, ReceiveTime={ReceiveTime}",
+                request.TaskNumber,
+                request.Priority,
+                request.Items.Count,
+                string.Join(" | ", request.Items.Select(x =>
+                    $"seq={x.Seq},taskType={x.TaskType},from={x.FromStation},to={x.ToStation},pallet={x.PalletNumber},bin={x.BinNumber}")),
+                JsonSerializer.Serialize(request, new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                }),
+                DateTime.Now.ToString(DateTimeFormat));
+
+            var persistResult = await _agvIntegrationService.EnqueueAgvCommandAsync(request, cancellationToken);
+            return persistResult.Status switch
+            {
+                AgvPersistStatus.Success => Ok(AgvIntegrationResponse.Success()),
+                AgvPersistStatus.Duplicate => Ok(AgvIntegrationResponse.Fail(
+                    string.IsNullOrWhiteSpace(persistResult.ErrorMsg) ? "taskNumber 已存在，禁止重复下发" : persistResult.ErrorMsg)),
+                AgvPersistStatus.Conflict => Ok(AgvIntegrationResponse.Fail(persistResult.ErrorMsg)),
+                _ => Ok(AgvIntegrationResponse.Fail(persistResult.ErrorMsg))
+            };
+        }
+
+        /// <summary>
+        /// 校验 MES 下发 AGV 工单请求的字段完整性与业务规则。
+        /// </summary>
+        /// <param name="request">工单请求体。</param>
+        /// <returns>错误信息列表；为空表示校验通过。</returns>
+        private static List<string> ValidateAgvWorkOrderRequest(AgvWorkOrderRequest? request)
+        {
+            var errors = new List<string>();
+            if (request is null)
+            {
+                errors.Add("请求体不能为空");
+                return errors;
+            }
+
+            ValidateRequired(request.OrderNumber, "orderNumber", errors);
+            ValidateRequired(request.MaterialNumber, "materialNumber", errors);
+            ValidateRequired(request.MaterialName, "materialName", errors);
+            ValidateRequired(request.MsgType, "msgType", errors);
+
+                if (!string.IsNullOrWhiteSpace(request.MsgType) && request.MsgType is not ("1" or "2"))
+                {
+                    errors.Add("msgType 仅支持 1(生效) 或 2(失效)");
+                }
+
+            return errors;
+        }
+
+        /// <summary>
+        /// 校验 MES 下发 AGV 指令请求（含 items 明细）的字段与业务规则。
+        /// </summary>
+        /// <param name="request">AGV 指令请求体。</param>
+        /// <returns>错误信息列表；为空表示校验通过。</returns>
+        private static List<string> ValidateAgvCommandRequest(AgvCommandRequest? request)
+        {
+                var errors = new List<string>();
+                if (request is null)
+                {
+                    errors.Add("请求体不能为空");
+                    return errors;
+                }
+
+                ValidateRequired(request.TaskNumber, "taskNumber", errors);
+
+                if (request.Priority is null)
+                {
+                    errors.Add("priority 不能为空");
+                }
+                else if (request.Priority is < 1 or > 3)
+                {
+                    errors.Add("priority 仅支持 1(高) / 2(中) / 3(低)");
+                }
+
+                if (request.Items is null || request.Items.Count == 0)
+                {
+                    errors.Add("items 至少需要 1 条明细");
+                    return errors;
+                }
+
+                var duplicateSeq = request.Items
+                    .GroupBy(x => x.Seq)
+                    .FirstOrDefault(g => g.Count() > 1);
+                if (duplicateSeq is not null)
+                {
+                    errors.Add($"items 中 seq={duplicateSeq.Key} 重复");
+                }
+
+                for (var i = 0; i < request.Items.Count; i++)
+                {
+                    var item = request.Items[i];
+                    var prefix = $"items[{i}]";
+
+                    if (item.Seq <= 0)
+                    {
+                        errors.Add($"{prefix}.seq 必须大于 0");
+                    }
+
+                    if (item.TaskType is null)
+                    {
+                        errors.Add($"{prefix}.taskType 不能为空");
+                        continue;
+                    }
+
+                    var taskType = item.TaskType.Value;
+                    if (taskType is < 1 or > 5)
+                    {
+                        errors.Add($"{prefix}.taskType 仅支持 1~5");
+                        continue;
+                    }
+
+                    ValidateRequired(item.ToStation, $"{prefix}.toStation", errors);
+
+                    if (taskType is 1 or 5 && string.IsNullOrWhiteSpace(item.PalletNumber))
+                    {
+                        errors.Add($"{prefix}.taskType={taskType} 时 palletNumber 必填");
+                    }
+
+                    if (taskType == 3 && string.IsNullOrWhiteSpace(item.BinNumber))
+                    {
+                        errors.Add($"{prefix}.taskType=3 时 binNumber 必填");
+                    }
+
+                    if (taskType is 2 or 4 or 5 && string.IsNullOrWhiteSpace(item.FromStation))
+                    {
+                        errors.Add($"{prefix}.taskType={taskType} 时 fromStation 必填");
+                    }
+                }
+
+                return errors;
+            }
+
+        /// <summary>
+        /// 校验必填字段非空。
+        /// </summary>
+        /// <param name="value">字段值。</param>
+        /// <param name="fieldName">字段名（用于错误信息）。</param>
+        /// <param name="errors">错误信息集合。</param>
+        private static void ValidateRequired(string? value, string fieldName, ICollection<string> errors)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                errors.Add($"{fieldName} 不能为空");
+            }
+        }
+
     }
 
     public class IntegrationOrderSyncRequest
@@ -212,5 +418,29 @@ namespace WarehouseManagementSystem.Controllers
         public string Message { get; set; } = string.Empty;
         public DateTime UpdatedAt { get; set; }
         public string TraceId { get; set; } = string.Empty;
+    }
+
+    public class AgvIntegrationResponse
+    {
+        public int Flag { get; set; }
+        public string ErrorMsg { get; set; } = string.Empty;
+
+        public static AgvIntegrationResponse Success()
+        {
+            return new AgvIntegrationResponse
+            {
+                Flag = 0,
+                ErrorMsg = string.Empty
+            };
+        }
+
+        public static AgvIntegrationResponse Fail(string errorMsg)
+        {
+            return new AgvIntegrationResponse
+            {
+                Flag = -1,
+                ErrorMsg = errorMsg
+            };
+        }
     }
 }

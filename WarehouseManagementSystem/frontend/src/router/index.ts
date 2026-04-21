@@ -44,6 +44,12 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true },
       },
       {
+        path: 'integration-data',
+        name: 'IntegrationData',
+        component: () => import('@/views/IntegrationDataView.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
         path: 'tasks/create',
         name: 'TaskCreate',
         component: () => import('@/views/TaskCreateView.vue'),
@@ -86,18 +92,6 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, title: 'API管理' },
       },
       {
-        path: 'external/workorders',
-        name: 'ExternalWorkOrders',
-        component: () => import('@/views/ExternalWorkOrdersView.vue'),
-        meta: { requiresAuth: true, title: '外部工单' },
-      },
-      {
-        path: 'external/agv-commands',
-        name: 'ExternalAgvCommands',
-        component: () => import('@/views/ExternalAgvCommandsView.vue'),
-        meta: { requiresAuth: true, title: 'AGV指令' },
-      },
-      {
         path: 'user-management',
         name: 'UserManagement',
         component: () => import('@/views/UserManagementView.vue'),
@@ -122,13 +116,16 @@ const router = createRouter({
   routes,
 })
 
+// 路由守卫
 router.beforeEach((to, _from, next) => {
   const authStore = useAuthStore()
   const requiresAuth = to.matched.some((record) => record.meta.requiresAuth)
 
   if (requiresAuth && !authStore.isAuthenticated) {
+    // 需要认证但未登录，重定向到登录页
     next('/login')
   } else if (to.path === '/login' && authStore.isAuthenticated) {
+    // 已登录用户访问登录页，重定向到首页
     next('/')
   } else {
     next()
