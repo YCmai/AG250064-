@@ -8,18 +8,17 @@
   >
     <div class="import-preview-container">
       <a-alert
-        :message="`共 ${previewData.length} 条数据待导入`"
+        :message="`${t('location.importSummary', { n: previewData.length })}`"
         type="info"
         show-icon
         style="margin-bottom: 16px"
       />
 
-      <!-- 验证结果统计 -->
       <a-row :gutter="16" style="margin-bottom: 16px">
         <a-col :span="8">
           <a-card size="small">
             <a-statistic
-              title="有效数据"
+              :title="t('location.validData')"
               :value="validCount"
               :value-style="{ color: '#52c41a' }"
             />
@@ -28,7 +27,7 @@
         <a-col :span="8">
           <a-card size="small">
             <a-statistic
-              title="无效数据"
+              :title="t('location.invalidData')"
               :value="invalidCount"
               :value-style="{ color: '#f5222d' }"
             />
@@ -37,7 +36,7 @@
         <a-col :span="8">
           <a-card size="small">
             <a-statistic
-              title="总计"
+              title="Total"
               :value="previewData.length"
               :value-style="{ color: '#1890ff' }"
             />
@@ -45,30 +44,28 @@
         </a-col>
       </a-row>
 
-      <!-- 数据预览表格 -->
       <a-table
         :columns="columns"
         :data-source="previewData"
         :pagination="{ pageSize: 10 }"
-        :scroll="{ x: 1000 }"
+        :scroll="{ x: 1400 }"
         size="small"
         bordered
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'status'">
             <a-tag v-if="record.errors.length === 0" color="success">
-              ✓ {{ t('common.valid') }}
+              ✓ {{ t('location.valid') }}
             </a-tag>
             <a-tooltip v-else :title="record.errors.join('; ')">
               <a-tag color="error">
-                ✗ {{ t('common.invalid') }}
+                ✗ {{ t('location.invalid') }}
               </a-tag>
             </a-tooltip>
           </template>
         </template>
       </a-table>
 
-      <!-- 错误信息列表 -->
       <div v-if="invalidCount > 0" style="margin-top: 16px">
         <a-alert
           :message="t('location.importErrorTitle', { count: invalidCount })"
@@ -90,7 +87,6 @@
         </a-list>
       </div>
 
-      <!-- 操作按钮 -->
       <div style="margin-top: 16px; text-align: right">
         <a-space>
           <a-button @click="handleCancel">{{ t('common.cancel') }}</a-button>
@@ -100,7 +96,7 @@
             :loading="isImporting"
             @click="handleConfirmImport"
           >
-            {{ t('location.confirmImport') }} ({{ validCount }})
+            {{ t('location.confirmImport', { n: validCount }) }}
           </a-button>
         </a-space>
       </div>
@@ -109,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -123,6 +119,7 @@ interface ImportData {
 interface Props {
   modelValue: boolean
   previewData: ImportData[]
+  importing?: boolean
 }
 
 interface Emits {
@@ -133,12 +130,12 @@ interface Emits {
 const props = withDefaults(defineProps<Props>(), {
   modelValue: false,
   previewData: () => [],
+  importing: false,
 })
 
 const emit = defineEmits<Emits>()
 
 const visible = ref(props.modelValue)
-const isImporting = ref(false)
 
 const columns = computed(() => [
   {
@@ -173,10 +170,22 @@ const columns = computed(() => [
     width: 100,
   },
   {
+    title: t('location.laneCode'),
+    dataIndex: ['data', 'laneCode'],
+    key: 'laneCode',
+    width: 100,
+  },
+  {
+    title: t('location.depthIndex'),
+    dataIndex: ['data', 'depthIndex'],
+    key: 'depthIndex',
+    width: 100,
+  },
+  {
     title: t('location.waitingNode'),
     dataIndex: ['data', 'wattingNode'],
     key: 'wattingNode',
-    width: 100,
+    width: 140,
   },
   {
     title: t('location.liftingHeight'),
@@ -190,30 +199,16 @@ const columns = computed(() => [
     key: 'unloadHeight',
     width: 100,
   },
-  {
-    title: t('location.depth'),
-    dataIndex: ['data', 'depth'],
-    key: 'depth',
-    width: 100,
-  },
 ])
 
-const validCount = computed(() => {
-  return props.previewData.filter(item => item.errors.length === 0).length
-})
-
-const invalidCount = computed(() => {
-  return props.previewData.filter(item => item.errors.length > 0).length
-})
+const validCount = computed(() => props.previewData.filter(item => item.errors.length === 0).length)
+const invalidCount = computed(() => props.previewData.filter(item => item.errors.length > 0).length)
+const isImporting = computed(() => props.importing)
 
 const allErrors = computed(() => {
-  const errors: string[] = []
-  props.previewData.forEach(item => {
-    if (item.errors.length > 0) {
-      errors.push(`${t('location.row')} ${item.rowNumber}: ${item.errors.join('; ')}`)
-    }
-  })
-  return errors
+  return props.previewData
+    .filter(item => item.errors.length > 0)
+    .map(item => `${t('location.row')} ${item.rowNumber}: ${item.errors.join('; ')}`)
 })
 
 watch(
@@ -231,15 +226,18 @@ watch(
 )
 
 const handleCancel = () => {
+  if (isImporting.value) {
+    return
+  }
+
   visible.value = false
 }
 
 const handleConfirmImport = () => {
-  // 只导入有效数据
   const validData = props.previewData
     .filter(item => item.errors.length === 0)
     .map(item => item.data)
-  
+
   emit('confirm', validData)
 }
 </script>

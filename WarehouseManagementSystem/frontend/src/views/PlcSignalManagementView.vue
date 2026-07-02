@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="plc-signal-management">
     <div class="view-header">
       <div class="header-left">
@@ -33,9 +33,14 @@
       <a-col :span="6" class="h-100">
         <a-card :title="t('plc.deviceList')" class="h-100 device-list-card" :bodyStyle="{ padding: '0', height: 'calc(100% - 57px)', overflowY: 'auto' }">
           <template #extra>
-            <a-button type="primary" size="small" @click="showDeviceModal()">
-              <plus-outlined /> {{ t('common.add') }}
-            </a-button>
+            <a-space>
+              <a-button size="small" @click="initializeDefaultDb1">
+                {{ t('plc.initializeDb1Template') }}
+              </a-button>
+              <a-button type="primary" size="small" @click="showDeviceModal()">
+                <plus-outlined /> {{ t('common.add') }}
+              </a-button>
+            </a-space>
           </template>
 
           <a-list item-layout="vertical" :data-source="devices">
@@ -350,6 +355,8 @@ interface PlcSignal {
   lastUpdateTime?: string | null;
 }
 
+const MANUAL_WRITABLE_WRITER = 'WMS';
+
 const devices = ref<PlcDevice[]>([]);
 const signals = ref<PlcSignal[]>([]);
 const allSignals = ref<PlcSignal[]>([]);
@@ -400,7 +407,6 @@ const signalColumns = computed(() => [
   { title: t('plc.currentValue'), key: 'currentValue', width: 160 },
   { title: t('plc.lastSignalUpdate'), key: 'lastUpdateTime', width: 180 },
   { title: t('plc.signalStatus'), key: 'signalStatus', width: 120 },
-  { title: t('common.remark'), dataIndex: 'remark' },
   { title: t('common.operation'), key: 'action', width: 130, align: 'center' }
 ]);
 
@@ -670,6 +676,45 @@ const handleSignalSubmit = async () => {
       signalModalVisible.value = false;
       await selectDevice(selectedDevice.value);
       await fetchAllSignalDiagnostics();
+    } else {
+      message.error(data.message || t('common.fail'));
+    }
+  } catch (_error) {
+    message.error(t('common.fail'));
+  } finally {
+    submitting.value = false;
+  }
+};
+
+const initializeDefaultDb1 = async () => {
+  submitting.value = true;
+  try {
+    const res = await fetch(`${API_BASE}/initialize-default-db1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ipAddress: '192.168.0.100',
+        port: 102,
+        brand: '西门子',
+        moduleAddress: 'DB1',
+        remark: 'DB1数据交互PLC',
+        isEnabled: true
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      message.success(data.message || t('plc.initializeDb1Success'));
+      await fetchDevices();
+      await fetchAllSignalDiagnostics();
+
+      const initializedDevice = devices.value.find(
+        (item) => item.ipAddress === '192.168.0.100' && (item.moduleAddress || '') === 'DB1'
+      );
+
+      if (initializedDevice) {
+        await selectDevice(initializedDevice);
+      }
     } else {
       message.error(data.message || t('common.fail'));
     }

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="plc-task-management">
     <a-card class="mb-3" :bodyStyle="{ padding: '16px' }">
       <a-form layout="inline">
@@ -123,6 +123,15 @@
           <template v-else-if="column.key === 'action'">
             <a-space>
               <a-button type="link" size="small" @click="showDetails(record)">{{ t('common.detail') }}</a-button>
+              <a-popconfirm
+                v-if="!record.isSend"
+                :title="t('plc.confirmDeleteTask')"
+                @confirm="deleteTask(record.orderCode)"
+                :ok-text="t('plc.yes')"
+                :cancel-text="t('plc.no')"
+              >
+                <a-button type="link" danger size="small">{{ t('common.delete') }}</a-button>
+              </a-popconfirm>
             </a-space>
           </template>
         </template>
@@ -252,7 +261,7 @@ const columns = computed(() => [
   { title: t('common.remark'), dataIndex: 'remark', ellipsis: true },
   { title: t('common.createTime'), key: 'createTime', width: 180 },
   { title: t('common.updateTime'), key: 'updateTime', width: 180 },
-  { title: t('common.operation'), key: 'action', width: 90, align: 'center' }
+  { title: t('common.operation'), key: 'action', width: 130, align: 'center' }
 ]);
 
 const loadFilterOptions = async () => {
@@ -317,6 +326,22 @@ const handleTableChange = (pag: any) => {
 const showDetails = (record: AutoPlcTask) => {
   selectedTask.value = record;
   detailsVisible.value = true;
+};
+
+const deleteTask = async (orderCode: string) => {
+  try {
+    const res = await fetch(`/api/auto-plc-task/${orderCode}`, { method: 'DELETE' });
+    const result = await res.json();
+    if (result.success) {
+      message.success(t('common.success'));
+      fetchData();
+    } else {
+      message.error(result.message || t('common.fail'));
+    }
+  } catch (error) {
+    console.error(error);
+    message.error(t('common.fail'));
+  }
 };
 
 const formatDate = (dateStr?: string) => {

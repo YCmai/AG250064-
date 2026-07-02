@@ -74,12 +74,12 @@ WHERE BusinessKey = @BusinessKey;",
         return count > 0;
     }
 
-    public Task InsertAsync(RCS_AgvOutboundQueue entity, CancellationToken cancellationToken = default)
+    public async Task InsertAsync(RCS_AgvOutboundQueue entity, CancellationToken cancellationToken = default)
     {
         using var connection = _db.CreateConnection();
         connection.Open();
 
-        return connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(new CommandDefinition(
             @"
 INSERT INTO RCS_AgvOutboundQueue
 (
@@ -122,7 +122,7 @@ VALUES
             @"
         SELECT TOP (@TopN) *
         FROM RCS_AgvOutboundQueue WITH (READPAST)
-        WHERE ProcessStatus IN (0, 2)
+        WHERE ProcessStatus IN (0)
           AND (NextRetryTime IS NULL OR NextRetryTime <= @Now)
         ORDER BY ID ASC;",
             new
@@ -136,12 +136,12 @@ VALUES
         return items.ToList();
     }
 
-    public Task MarkSuccessAsync(int id, DateTime processTime, CancellationToken cancellationToken = default)
+    public async Task MarkSuccessAsync(int id, DateTime processTime, CancellationToken cancellationToken = default)
     {
         using var connection = _db.CreateConnection();
         connection.Open();
 
-        return connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(new CommandDefinition(
             @"
         UPDATE RCS_AgvOutboundQueue
         SET ProcessStatus = 1,
@@ -158,20 +158,20 @@ VALUES
             cancellationToken: cancellationToken));
     }
 
-    public Task MarkFailedAsync(int id, int retryCount, string errorMsg, DateTime nextRetryTime, CancellationToken cancellationToken = default)
+    public async Task MarkFailedAsync(int id, int retryCount, string errorMsg, DateTime nextRetryTime, CancellationToken cancellationToken = default)
     {
         using var connection = _db.CreateConnection();
         connection.Open();
 
-        return connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(new CommandDefinition(
             @"
-UPDATE RCS_AgvOutboundQueue
-SET ProcessStatus = 2,
-    RetryCount = @RetryCount,
-    LastError = @LastError,
-    NextRetryTime = @NextRetryTime,
-    UpdateTime = @UpdateTime
-WHERE ID = @ID;",
+            UPDATE RCS_AgvOutboundQueue
+            SET ProcessStatus = 2,
+                RetryCount = @RetryCount,
+                LastError = @LastError,
+                NextRetryTime = @NextRetryTime,
+                UpdateTime = @UpdateTime
+            WHERE ID = @ID;",
             new
             {
                 ID = id,
@@ -183,12 +183,12 @@ WHERE ID = @ID;",
             cancellationToken: cancellationToken));
     }
 
-    public Task MarkAbandonedAsync(int id, int retryCount, string errorMsg, DateTime processTime, CancellationToken cancellationToken = default)
+    public async Task MarkAbandonedAsync(int id, int retryCount, string errorMsg, DateTime processTime, CancellationToken cancellationToken = default)
     {
         using var connection = _db.CreateConnection();
         connection.Open();
 
-        return connection.ExecuteAsync(new CommandDefinition(
+        await connection.ExecuteAsync(new CommandDefinition(
             @"
         UPDATE RCS_AgvOutboundQueue
         SET ProcessStatus = 3,

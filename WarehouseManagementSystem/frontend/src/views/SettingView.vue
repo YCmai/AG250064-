@@ -22,6 +22,28 @@
                   <a-input-number v-model:value="paramSettings.RefreshInterval" style="width: 100%" :min="1" :max="60" />
                 </a-form-item>
               </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('settings.mesTaskType2TargetGroup')" :help="$t('settings.mesTaskType2TargetGroupHint')">
+                  <a-select
+                    v-model:value="paramSettings.MesTaskType2TargetGroup"
+                    :placeholder="$t('settings.mesTaskType2TargetGroupPlaceholder')"
+                    :options="locationGroupOptions.map(item => ({ label: item, value: item }))"
+                    show-search
+                    allow-clear
+                  />
+                </a-form-item>
+              </a-col>
+              <a-col :xs="24" :md="12">
+                <a-form-item :label="$t('settings.mesTaskType4TargetGroup')" :help="$t('settings.mesTaskType4TargetGroupHint')">
+                  <a-select
+                    v-model:value="paramSettings.MesTaskType4TargetGroup"
+                    :placeholder="$t('settings.mesTaskType4TargetGroupPlaceholder')"
+                    :options="locationGroupOptions.map(item => ({ label: item, value: item }))"
+                    show-search
+                    allow-clear
+                  />
+                </a-form-item>
+              </a-col>
               <a-col :xs="24" :md="12" v-if="false">
                 <a-form-item :label="$t('settings.systemType')" help="选择系统运行模式">
                   <a-select v-model:value="paramSettings.SystemType">
@@ -143,6 +165,7 @@ import { message } from 'ant-design-vue';
 import { CloudDownloadOutlined } from '@ant-design/icons-vue';
 import { useSettingStore } from '../stores/setting';
 import { useI18n } from 'vue-i18n';
+import locationService from '../services/location';
 
 const { t, locale } = useI18n();
 const settingStore = useSettingStore();
@@ -155,7 +178,9 @@ const paramSettings = ref<Record<string, any>>({
   TaskTimeout: 300,
   MaxRetries: 3,
   RefreshInterval: 5,
-  SystemType: 'NDC'
+  SystemType: 'NDC',
+  MesTaskType2TargetGroup: '',
+  MesTaskType4TargetGroup: ''
 });
 
 const appearanceSettings = ref<Record<string, any>>({
@@ -171,6 +196,7 @@ const serviceSettings = ref<Record<string, boolean>>({
 });
 
 const databaseStatus = ref<any>({});
+const locationGroupOptions = ref<string[]>([]);
 
 const serviceLocaleMap = {
   'zh-CN': {
@@ -212,13 +238,25 @@ onMounted(async () => {
 const loadAllData = async () => {
   await Promise.all([
     settingStore.fetchSettings(),
-    settingStore.fetchDatabaseStatus()
+    settingStore.fetchDatabaseStatus(),
+    loadLocationGroups()
   ]);
 
   databaseStatus.value = { ...settingStore.databaseStatus };
   mapSettingsToModel(settingStore.settings, paramSettings.value);
   mapSettingsToModel(settingStore.settings, appearanceSettings.value);
   mapSettingsToModel(settingStore.settings, serviceSettings.value);
+};
+
+const loadLocationGroups = async () => {
+  try {
+    const response = await locationService.getGroups();
+    if (response.success && response.data) {
+      locationGroupOptions.value = response.data;
+    }
+  } catch (_err) {
+    locationGroupOptions.value = [];
+  }
 };
 
 const mapSettingsToModel = (settings: any[], model: Record<string, any>) => {

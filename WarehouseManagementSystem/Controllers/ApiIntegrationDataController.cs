@@ -152,7 +152,14 @@ public class ApiIntegrationDataController : ControllerBase
                        i.FromStation,
                        i.ToStation,
                        i.TaskType,
-                       i.CreateTime
+                       i.RequestCode,
+                       i.ProcessStatus,
+                       i.TaskStatus,
+                       i.ErrorMsg,
+                       i.UserTaskId,
+                       i.CreateTime,
+                       i.UpdateTime,
+                       i.ProcessTime
                    FROM RCS_AgvCommandInboxItems i
                    INNER JOIN RCS_AgvCommandInbox h ON h.ID = i.InboxId
                    {whereSql}
@@ -468,7 +475,14 @@ public class AgvCommandInboxItemView
     public string? FromStation { get; set; }
     public string ToStation { get; set; } = string.Empty;
     public int TaskType { get; set; }
+    public string? RequestCode { get; set; }
+    public int ProcessStatus { get; set; }
+    public int? TaskStatus { get; set; }
+    public string? ErrorMsg { get; set; }
+    public int? UserTaskId { get; set; }
     public DateTime CreateTime { get; set; }
+    public DateTime? UpdateTime { get; set; }
+    public DateTime? ProcessTime { get; set; }
 }
 
 /// <summary>

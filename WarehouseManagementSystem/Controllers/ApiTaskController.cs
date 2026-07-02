@@ -180,7 +180,11 @@ namespace WarehouseManagementSystem.Controllers
 
                 // 创建任务
                 var (success, message, taskId) = await _locationService.CreateRelocateTask(
-                    request.SourcePosition, request.TargetPosition, request.MaterialCode ?? "");
+                    request.SourcePosition,
+                    request.TargetPosition,
+                    request.MaterialCode ?? "",
+                    ResolveRequestedTaskType(request.TaskType),
+                    request.Priority);
 
                 if (!success)
                 {
@@ -252,18 +256,24 @@ namespace WarehouseManagementSystem.Controllers
 
             try
             {
-                var (locations, _) = await _locationService.GetLocations("", 1, 10000);
-
-                var availableLocations = locations
-                    
+                var availableLocations = (await _locationService.GetRecommendedLocations())
                     .Select(l => new AvailableLocationResponse
                     {
                         Id = l.Id,
                         Name = l.Name,
                         NodeRemark = l.NodeRemark,
                         Group = l.Group,
-                        IsEmpty = string.IsNullOrEmpty(l.MaterialCode),
-                        IsLocked = l.Lock
+                        LaneCode = l.LaneCode,
+                        DepthIndex = l.DepthIndex,
+                        WattingNode = l.WattingNode,
+                        IsEmpty = l.IsEmpty,
+                        IsLocked = l.IsLocked,
+                        Enabled = l.Enabled,
+                        MaterialCode = l.MaterialCode,
+                        PalletID = l.PalletID,
+                        IsReachableTarget = l.IsReachableTarget,
+                        IsRecommendedTarget = l.IsRecommendedTarget,
+                        RecommendationOrder = l.RecommendationOrder
                     })
                     .ToList();
 
@@ -426,6 +436,13 @@ namespace WarehouseManagementSystem.Controllers
                 _logger.LogError(ex, "获取任务统计信息失败");
                 return StatusCode(500, ApiResponseHelper.Failure<TaskStatisticsResponse>($"获取任务统计信息失败: {ex.Message} {ex.StackTrace}"));
             }
+        }
+
+        private static TaskTypeEnum? ResolveRequestedTaskType(int taskType)
+        {
+            return Enum.IsDefined(typeof(TaskTypeEnum), taskType)
+                ? (TaskTypeEnum)taskType
+                : null;
         }
     }
 
@@ -593,6 +610,21 @@ namespace WarehouseManagementSystem.Controllers
         public string Group { get; set; }
 
         /// <summary>
+        /// 库道编号
+        /// </summary>
+        public string LaneCode { get; set; }
+
+        /// <summary>
+        /// 深度序号
+        /// </summary>
+        public int DepthIndex { get; set; }
+
+        /// <summary>
+        /// 信号请求点
+        /// </summary>
+        public string WattingNode { get; set; }
+
+        /// <summary>
         /// 是否为空
         /// </summary>
         public bool IsEmpty { get; set; }
@@ -601,6 +633,36 @@ namespace WarehouseManagementSystem.Controllers
         /// 是否锁定
         /// </summary>
         public bool IsLocked { get; set; }
+
+        /// <summary>
+        /// 是否启用
+        /// </summary>
+        public bool Enabled { get; set; }
+
+        /// <summary>
+        /// 物料编码
+        /// </summary>
+        public string MaterialCode { get; set; }
+
+        /// <summary>
+        /// 托盘编号
+        /// </summary>
+        public string PalletID { get; set; }
+
+        /// <summary>
+        /// 是否可达
+        /// </summary>
+        public bool IsReachableTarget { get; set; }
+
+        /// <summary>
+        /// 是否推荐
+        /// </summary>
+        public bool IsRecommendedTarget { get; set; }
+
+        /// <summary>
+        /// 推荐顺序
+        /// </summary>
+        public int? RecommendationOrder { get; set; }
     }
 }
 

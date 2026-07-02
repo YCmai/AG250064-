@@ -4,7 +4,6 @@ using WarehouseManagementSystem.Models.Ndc;
 using WarehouseManagementSystem.Services.Ndc;
 
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 using NdcTaskStatuEnum = WarehouseManagementSystem.Models.Enums.TaskStatuEnum;
 using NdcTaskTypeEnum = WarehouseManagementSystem.Models.Enums.TaskTypeEnum;
 
@@ -13,9 +12,6 @@ using System.Linq;
 
 using System.Threading;
 using System.Threading.Tasks;
-using System.Net.Http;
-using System.Text;
-using Newtonsoft.Json;
 using WarehouseManagementSystem.Models.Enums;
 using WarehouseManagementSystem.Services.Integrations;
 
@@ -36,11 +32,8 @@ namespace WarehouseManagementSystem.Services.Ndc
         private readonly IAciTaskDataService _taskDataService;
         private readonly IAciLocationDataService _locationDataService;
         private readonly IAciInteractionDataService _interactionDataService;
-        private readonly IAgvOutboundInteractionService _agvOutboundInteractionService;
-        private readonly IAgvOutboundQueueRepository _agvOutboundQueueRepository;
+        private readonly IAgvSafetyInteractionService _agvSafetyInteractionService;
         private readonly ILogger<AciDataEventHandler> _logger;
-        private readonly IHttpClientFactory? _httpClientFactory;
-        private readonly IConfiguration _configuration;
         private static readonly SemaphoreSlim _semaphore = new(1, 1);
         
         public AciDataEventHandler(
@@ -48,21 +41,15 @@ namespace WarehouseManagementSystem.Services.Ndc
             IAciTaskDataService taskDataService,
             IAciLocationDataService locationDataService,
             IAciInteractionDataService interactionDataService,
-            IAgvOutboundInteractionService agvOutboundInteractionService,
-            IAgvOutboundQueueRepository agvOutboundQueueRepository,
-            ILogger<AciDataEventHandler> logger, 
-            IConfiguration configuration,
-            IHttpClientFactory? httpClientFactory = null)
+            IAgvSafetyInteractionService agvSafetyInteractionService,
+            ILogger<AciDataEventHandler> logger)
         {
             _aciAppManager = aciAppManager;
             _taskDataService = taskDataService;
             _locationDataService = locationDataService;
             _interactionDataService = interactionDataService;
-            _agvOutboundInteractionService = agvOutboundInteractionService;
-            _agvOutboundQueueRepository = agvOutboundQueueRepository;
+            _agvSafetyInteractionService = agvSafetyInteractionService;
             _logger = logger;
-            _httpClientFactory = httpClientFactory;
-            _configuration = configuration;
         }
 
         #endregion
@@ -509,42 +496,18 @@ namespace WarehouseManagementSystem.Services.Ndc
                 var load1 = await _taskDataService.FindNdcTaskByNdcTaskIdAndStatusAsync(ev.Parameter2, NdcTaskStatuEnum.PickingUp);
                 if (load1 != null)
                 {
-                    // 示例安全交互：先查记录，无记录才入队；有记录则只看状态，成功才回复 NDC。
-                    var taskNumber = load1.SchedulTaskNo?.Trim();
-                    if (string.IsNullOrWhiteSpace(taskNumber))
-                    {
-                        return;
-                    }
-
-                    var safetyRecord = await _agvOutboundQueueRepository.GetLatestByTaskNumberAndEventTypeAsync(
-                        taskNumber,
-                        (int)AgvOutboundEventType.SafetySignal);
-
-                    // 无记录则创建后等待下次循环，不立即回复。
-                    if (safetyRecord == null)
-                    {
-                        var safetyRequestTime = load1.CreationTime == default ? DateTime.Now : load1.CreationTime;
-                        var room = $"NDC_LOAD_{load1.PickupSite}";
-                        _logger.LogInformation(
-                            "LoadHostSyncronisation 安全交互无记录，准备入队。TaskNumber={TaskNumber}, Room={Room}, RequestDate={RequestDate:yyyy-MM-dd HH:mm:ss}",
-                            taskNumber,
-                            room,
-                            safetyRequestTime);
-                        await _agvOutboundInteractionService.NotifySafetySignalAsync(taskNumber, safetyRequestTime, room);
-                        return;
-                    }
-
-                    // 有记录但未成功（0待处理/2重试中/3终态失败）都不回复，等待下次循环。
-                    if (safetyRecord.ProcessStatus != 1)
-                    {
-                        return;
-                    }
+                    //安全交互
+                    //var isSafeToContinue = await TryHandleLoadSafetyInteractionAsync(load1);
+                    //if (!isSafeToContinue)
+                    //{
+                    //    return;
+                    //}
 
                     var upHeight = load1.PickupHeight == 0 ? 0 : load1.PickupHeight;
                     var upDepth = 0;
 
                     _aciAppManager.SendHostAcknowledge(null, ev.Index, (int)ReplyTaskState.PickingUp, upHeight, upDepth);
-                    _logger.LogInformation("安全交互完成后回复NDC，TaskNumber={TaskNumber}, QueueId={QueueId}", taskNumber, safetyRecord.ID);
+                    _logger.LogInformation("安全交互完成后回复NDC，TaskNumber={TaskNumber}", load1.SchedulTaskNo?.Trim());
                 }
             }
             catch (Exception ex)
@@ -552,6 +515,40 @@ namespace WarehouseManagementSystem.Services.Ndc
 
                 LogEventError("HandleLoadHostSyncronisationEvent", ev, ex);
             }
+        }
+
+        /// <summary>
+        /// 处理装货前安全交互。
+        /// Why: 安全交互必须在当前 NDC 步骤内拿到实时结果后才能决定是否放行，
+        /// 因此这里不再查异步出站队列表，而是直接调用安全交互服务并根据最近状态判定。
+        /// 边界条件：若 MES 返回不安全或接口异常，则本次不回复 NDC，等待下次循环继续判断。
+        /// </summary>
+        /// <param name="loadTask">当前装货任务。</param>
+        /// <returns>是否允许继续回复 NDC。</returns>
+        private async Task<bool> TryHandleLoadSafetyInteractionAsync(NdcTaskMove loadTask)
+        {
+            var taskNumber = loadTask.SchedulTaskNo?.Trim();
+            if (string.IsNullOrWhiteSpace(taskNumber))
+            {
+                _logger.LogWarning("装货前安全交互跳过：任务号为空，TaskId={TaskId}, NdcTaskId={NdcTaskId}", loadTask.Id, loadTask.NdcTaskId);
+                return false;
+            }
+
+            var room = $"Room{loadTask.PickupSite}";
+            var requestDate = DateTime.Now;
+            var result = await _agvSafetyInteractionService.CheckSafetyAsync(taskNumber, requestDate, room);
+            if (result.IsSafeToContinue)
+            {
+                return true;
+            }
+
+            _logger.LogInformation(
+                "装货前安全交互未放行，TaskNumber={TaskNumber}, Room={Room}, Message={Message}, NextRetryTime={NextRetryTime}",
+                taskNumber,
+                room,
+                result.Message,
+                result.NextRetryTime);
+            return false;
         }
 
       

@@ -56,7 +56,23 @@ const taskService = {
     }),
 
   getAvailableLocations: () =>
-    api.get<ApiResponse<Array<{ id: number; name: string; nodeRemark: string; group: string; isEmpty: boolean }>>>('/task/available-locations'),
+    api.get<ApiResponse<Array<{
+      id: number
+      name: string
+      nodeRemark: string
+      group: string
+      laneCode: string
+      depthIndex: number
+      wattingNode: string
+      isEmpty: boolean
+      isLocked: boolean
+      enabled: boolean
+      materialCode: string | null
+      palletID: string | null
+      isReachableTarget: boolean
+      isRecommendedTarget: boolean
+      recommendationOrder: number | null
+    }>>>('/task/available-locations'),
 
   cancelTask: (id: number) => api.post<ApiResponse<void>>(`/task/${id}/cancel`),
 

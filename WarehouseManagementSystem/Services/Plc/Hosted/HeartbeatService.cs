@@ -26,7 +26,7 @@ namespace WarehouseManagementSystem.Service.Plc
         private Task? _heartbeatTask;
         private bool _currentHeartbeatState = true;
         private readonly Dictionary<string, DateTime> _lastHeartbeatTime = new();
-        private const int HeartbeatIntervalSeconds = 1;
+        private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMilliseconds(500);
         private readonly IPlcCommunicationService _heartbeatPlcService;
 
         public HeartbeatService(
@@ -103,7 +103,7 @@ namespace WarehouseManagementSystem.Service.Plc
                         {
                             var deviceKey = $"{device.IpAddress}_{device.ModuleAddress}";
                             if (_lastHeartbeatTime.TryGetValue(deviceKey, out var lastTime) &&
-                                (now - lastTime).TotalSeconds < HeartbeatIntervalSeconds)
+                                (now - lastTime) < HeartbeatInterval)
                             {
                                 continue;
                             }
@@ -118,7 +118,7 @@ namespace WarehouseManagementSystem.Service.Plc
                     }
 
                     _currentHeartbeatState = !_currentHeartbeatState;
-                    await Task.Delay(HeartbeatIntervalSeconds * 1000, _cts.Token);
+                    await Task.Delay(HeartbeatInterval, _cts.Token);
                 }
                 catch (OperationCanceledException)
                 {
@@ -155,11 +155,17 @@ namespace WarehouseManagementSystem.Service.Plc
                     SELECT * FROM RCS_PlcSignal
                     WHERE PlcDeviceId = @PlcDeviceId
                       AND PLCTypeDb = @PLCTypeDb
-                      AND Remark = '进站心跳'",
+                      AND (
+                            (@SignalRemark IS NOT NULL AND Remark = @SignalRemark)
+                         OR (@SignalName IS NOT NULL AND Name = @SignalName)
+                         OR Remark = '进站心跳'
+                      )",
                     new
                     {
                         PlcDeviceId = device.IpAddress,
-                        PLCTypeDb = config.ModuleAddress
+                        PLCTypeDb = config.ModuleAddress,
+                        SignalRemark = config.SignalRemark,
+                        SignalName = config.SignalName
                     });
 
                 if (signal != null)

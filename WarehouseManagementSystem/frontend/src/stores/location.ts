@@ -11,6 +11,9 @@ export interface Location {
   isEmpty: boolean
   lock: boolean
   enabled: boolean
+  laneCode: string
+  depthIndex: number
+  wattingNode: string
 }
 
 export const useLocationStore = defineStore('location', () => {

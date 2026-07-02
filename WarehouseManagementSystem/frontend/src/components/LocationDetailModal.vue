@@ -1,53 +1,58 @@
 <template>
   <a-modal
     v-model:open="visible"
-    :title="`储位详情 - ${location?.name}`"
-    width="700px"
+    :title="`${t('location.detailTitle', { name: location?.name || '-' })}`"
+    width="760px"
     @ok="handleOk"
   >
     <a-spin v-if="isLoading" />
     <a-descriptions v-else-if="location" :column="2" bordered>
-      <a-descriptions-item label="储位名称" :span="2">
+      <a-descriptions-item :label="t('location.name')" :span="2">
         {{ location.name }}
       </a-descriptions-item>
-      <a-descriptions-item label="节点备注" :span="2">
+      <a-descriptions-item :label="t('location.nodeRemark')" :span="2">
         {{ location.nodeRemark || '-' }}
       </a-descriptions-item>
-      <a-descriptions-item label="分组">
-        {{ location.group }}
+      <a-descriptions-item :label="t('location.group')">
+        {{ location.group || '-' }}
       </a-descriptions-item>
-      <a-descriptions-item label="入库时间">
+      <a-descriptions-item :label="t('location.entryDate')">
         {{ location.entryDate || '-' }}
       </a-descriptions-item>
-      <a-descriptions-item label="物料代码">
+      <a-descriptions-item :label="t('location.laneCode')">
+        {{ location.laneCode || '-' }}
+      </a-descriptions-item>
+      <a-descriptions-item :label="t('location.depthIndex')">
+        {{ location.depthIndex || '-' }}
+      </a-descriptions-item>
+      <a-descriptions-item :label="t('location.waitingNode')">
+        {{ location.wattingNode || '-' }}
+      </a-descriptions-item>
+      <a-descriptions-item :label="t('location.materialCode')">
         {{ location.materialCode || '-' }}
       </a-descriptions-item>
-      <a-descriptions-item label="托盘ID">
+      <a-descriptions-item :label="t('location.palletId')">
         {{ location.palletID || '-' }}
       </a-descriptions-item>
-      <a-descriptions-item label="是否为空">
+      <a-descriptions-item :label="t('location.isEmpty')">
         <a-tag :color="location.isEmpty ? '#52c41a' : '#faad14'">
-          {{ location.isEmpty ? '是' : '否' }}
+          {{ location.isEmpty ? t('location.yes') : t('location.no') }}
         </a-tag>
       </a-descriptions-item>
-      <a-descriptions-item label="是否锁定">
+      <a-descriptions-item :label="t('location.isLocked')">
         <a-tag :color="location.lock ? '#f5222d' : '#52c41a'">
-          {{ location.lock ? '是' : '否' }}
+          {{ location.lock ? t('location.yes') : t('location.no') }}
         </a-tag>
       </a-descriptions-item>
-      <a-descriptions-item label="是否启用" :span="2">
+      <a-descriptions-item :label="t('location.isEnabled')" :span="2">
         <a-tag :color="location.enabled ? '#52c41a' : '#8c8c8c'">
-          {{ location.enabled ? '是' : '否' }}
+          {{ location.enabled ? t('location.yes') : t('location.no') }}
         </a-tag>
       </a-descriptions-item>
-      <a-descriptions-item label="操作" :span="2">
+      <a-descriptions-item :label="t('common.operation')" :span="2">
         <a-space wrap>
-          <a-button
-            type="primary"
-            size="small"
-            @click="handleEdit"
-          >
-            编辑
+          <a-button type="primary" size="small" @click="handleEdit">
+            {{ t('common.edit') }}
           </a-button>
           <a-button
             size="small"
@@ -56,28 +61,28 @@
             :disabled="location.isEmpty"
             danger
           >
-            清空物料
+            {{ t('location.clearMaterial') }}
           </a-button>
           <a-button
             size="small"
             @click="handleToggleLock"
             :loading="isTogglingLock"
           >
-            {{ location.lock ? '解锁' : '锁定' }}
+            {{ location.lock ? t('location.unlock') : t('location.lock') }}
           </a-button>
           <a-button
             size="small"
             @click="handleTransferMaterial"
             :disabled="location.isEmpty"
           >
-            物料转移（直接转移）
+            {{ t('location.transfer') }}
           </a-button>
           <a-button
             size="small"
             @click="handleRelocateMaterial"
             :disabled="location.isEmpty"
           >
-            物料移库（生成AGV任务）
+            {{ t('location.relocate') }}
           </a-button>
         </a-space>
       </a-descriptions-item>
@@ -86,16 +91,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { message } from 'ant-design-vue'
 import { Location } from '@/services/location'
 import locationService from '@/services/location'
-import { message } from 'ant-design-vue'
 
 interface Props {
-  modelValue?: boolean // Vue 3 v-model for visible
-  open?: boolean // Ant Design Vue 4 uses open
+  modelValue?: boolean
+  open?: boolean
   location: Location | null
 }
 
@@ -117,13 +122,12 @@ const emit = defineEmits<Emits>()
 const router = useRouter()
 const { t } = useI18n()
 
-// Handle both v-model:open (Antdv 4) and v-model:visible (Antdv 3/Custom)
 const visible = computed({
-  get: () => props.open !== undefined ? props.open : props.modelValue,
+  get: () => (props.open !== undefined ? props.open : props.modelValue),
   set: (val) => {
     emit('update:open', val)
     emit('update:modelValue', val)
-  }
+  },
 })
 
 const isLoading = ref(false)
@@ -135,71 +139,75 @@ const handleOk = () => {
 }
 
 const handleEdit = () => {
-  if (!props.location) return
-  
-  // Close the modal
+  if (!props.location) {
+    return
+  }
+
   visible.value = false
-  
-  // Navigate to edit page
   router.push({
     name: 'LocationEdit',
-    params: { id: props.location.id }
+    params: { id: props.location.id },
   })
 }
 
 const handleClearMaterial = async () => {
-  if (!props.location) return
+  if (!props.location) {
+    return
+  }
 
   isClearingMaterial.value = true
   try {
     const response = await locationService.clearMaterial(props.location.id)
     if (response.success) {
-      message.success('清空物料成功')
+      message.success(t('common.success'))
       emit('refresh')
       visible.value = false
     } else {
-      message.error(response.message || '清空物料失败')
+      message.error(response.message || t('common.fail'))
     }
   } catch (error: any) {
-    message.error(error.message || '清空物料失败')
+    message.error(error.message || t('common.fail'))
   } finally {
     isClearingMaterial.value = false
   }
 }
 
 const handleToggleLock = async () => {
-  if (!props.location) return
+  if (!props.location) {
+    return
+  }
 
   isTogglingLock.value = true
   try {
     const response = await locationService.toggleLock(props.location.id, !props.location.lock)
     if (response.success) {
-      message.success('操作成功')
+      message.success(response.message || t('common.success'))
       emit('refresh')
-      // visible.value = false // Keep modal open to see change
     } else {
-      message.error(response.message || '操作失败')
+      message.error(response.message || t('common.fail'))
     }
   } catch (error: any) {
-    message.error(error.message || '操作失败')
+    message.error(error.message || t('common.fail'))
   } finally {
     isTogglingLock.value = false
   }
 }
 
-
 const handleTransferMaterial = () => {
-  // 触发父组件的物料转移事件
+  if (!props.location) {
+    return
+  }
+
   emit('transfer-material', props.location)
   visible.value = false
 }
 
 const handleRelocateMaterial = () => {
-  // 触发父组件的物料移库事件
+  if (!props.location) {
+    return
+  }
+
   emit('relocate-material', props.location)
   visible.value = false
 }
 </script>
-
-<style scoped>
-</style>

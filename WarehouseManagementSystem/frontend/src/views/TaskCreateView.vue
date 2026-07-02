@@ -1,8 +1,6 @@
 <template>
   <div class="task-create-container">
     <a-card :title="t('task.createTitle')" :body-style="{ padding: '12px' }">
-      
-      <!-- Selection Summary -->
       <div class="selection-summary">
         <div class="summary-step source" :class="{ active: !formState.sourcePosition, completed: formState.sourcePosition }">
           <span class="label">{{ t('task.source') }}:</span>
@@ -23,7 +21,6 @@
         @finish="handleSubmit"
         class="task-create-form"
       >
-        <!-- Task Type Selection -->
         <a-form-item :label="t('task.type')" name="taskType" style="margin-bottom: 12px" v-show="false">
           <a-select v-model:value="formState.taskType" style="width: 100%">
             <a-select-option v-for="opt in taskTypeOptions" :key="opt.value" :value="opt.value">
@@ -33,32 +30,32 @@
         </a-form-item>
 
         <div class="selection-panels">
-          <!-- Source Panel -->
           <div class="panel source-panel">
             <div class="panel-header">
               <span class="title">{{ t('task.sourcePosition') }}</span>
-              <a-input 
-                v-model:value="sourceSearch" 
-                :placeholder="t('task.searchSource')" 
-                allow-clear 
+              <a-input
+                v-model:value="sourceSearch"
+                :placeholder="t('task.searchSource')"
+                allow-clear
                 size="small"
-                style="width: 150px"
+                style="width: 180px"
               />
             </div>
             <div class="grid-container custom-scrollbar">
-              <div 
-                v-for="loc in filteredSourceLocations" 
+              <div
+                v-for="loc in filteredSourceLocations"
                 :key="loc.id"
-                class="grid-item" 
+                class="grid-item"
                 :class="[
-                  { 'selected': formState.sourcePosition === loc.nodeRemark },
-                  { 'disabled': formState.targetPosition === loc.nodeRemark || loc.isLocked },
+                  { selected: formState.sourcePosition === loc.nodeRemark },
+                  { disabled: formState.targetPosition === loc.nodeRemark },
                   loc.isLocked ? 'status-locked' : (!loc.isEmpty ? 'status-full' : 'status-empty')
                 ]"
-                @click="!loc.isLocked && selectSource(loc)"
+                @click="selectSource(loc)"
               >
                 <div class="loc-name">{{ loc.nodeRemark }}</div>
-                <div class="loc-group" v-if="loc.group">{{ loc.group }}</div>
+                <div class="loc-group">{{ `${loc.group || '-'} / ${loc.laneCode || '-'}` }}</div>
+                <div class="loc-depth">深度 {{ loc.depthIndex || '-' }}</div>
                 <div class="loc-status">
                   <span v-if="loc.isLocked" class="indicator locked">锁定</span>
                   <span v-else-if="!loc.isEmpty" class="indicator full">有货</span>
@@ -71,36 +68,39 @@
             </div>
           </div>
 
-          <!-- Target Panel -->
           <div class="panel target-panel">
             <div class="panel-header">
               <span class="title">{{ t('task.targetPosition') }}</span>
-              <a-input 
-                v-model:value="targetSearch" 
-                :placeholder="t('task.searchTarget')" 
-                allow-clear 
+              <a-input
+                v-model:value="targetSearch"
+                :placeholder="t('task.searchTarget')"
+                allow-clear
                 size="small"
-                style="width: 150px"
+                style="width: 180px"
               />
             </div>
             <div class="grid-container custom-scrollbar">
-              <div 
-                v-for="loc in filteredTargetLocations" 
+              <div
+                v-for="loc in filteredTargetLocations"
                 :key="loc.id"
-                class="grid-item" 
+                class="grid-item"
                 :class="[
-                  { 'selected': formState.targetPosition === loc.nodeRemark },
-                  { 'disabled': formState.sourcePosition === loc.nodeRemark || loc.isLocked },
-                  loc.isLocked ? 'status-locked' : (!loc.isEmpty ? 'status-full' : 'status-empty')
+                  { selected: formState.targetPosition === loc.nodeRemark },
+                  { disabled: formState.sourcePosition === loc.nodeRemark || loc.isLocked || !loc.isReachableTarget || !loc.isEmpty },
+                  loc.isLocked ? 'status-locked' : (loc.isRecommendedTarget ? 'status-recommended' : (loc.isReachableTarget ? 'status-empty' : 'status-blocked'))
                 ]"
-                @click="!loc.isLocked && selectTarget(loc)"
+                @click="!loc.isLocked && loc.isReachableTarget && loc.isEmpty && selectTarget(loc)"
               >
                 <div class="loc-name">{{ loc.nodeRemark }}</div>
-                <div class="loc-group" v-if="loc.group">{{ loc.group }}</div>
+                <div class="loc-group">{{ `${loc.group || '-'} / ${loc.laneCode || '-'}` }}</div>
+                <div class="loc-depth">深度 {{ loc.depthIndex || '-' }}</div>
                 <div class="loc-status">
                   <span v-if="loc.isLocked" class="indicator locked">锁定</span>
-                  <span v-else-if="!loc.isEmpty" class="indicator full">有货</span>
-                  <span v-else class="indicator empty">空置</span>
+                  <span v-else-if="!loc.isReachableTarget" class="indicator blocked">不可达</span>
+                  <span v-else-if="loc.isRecommendedTarget" class="indicator recommended">
+                    {{ `推荐${loc.recommendationOrder ? `#${loc.recommendationOrder}` : ''}` }}
+                  </span>
+                  <span v-else class="indicator empty">可达</span>
                 </div>
               </div>
               <div v-if="filteredTargetLocations.length === 0" class="empty-state">
@@ -113,10 +113,10 @@
         <div class="form-actions">
           <a-space size="large">
             <a-button @click="handleCancel">{{ t('common.cancel') }}</a-button>
-            <a-button 
-              type="primary" 
-              html-type="submit" 
-              :loading="isSubmitting" 
+            <a-button
+              type="primary"
+              html-type="submit"
+              :loading="isSubmitting"
               :disabled="!formState.sourcePosition || !formState.targetPosition"
               size="large"
             >
@@ -130,24 +130,38 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import taskService from '@/services/task'
 import { message } from 'ant-design-vue'
 import { useI18n } from 'vue-i18n'
-import { useSettingStore } from '@/stores/setting'
 import { getTaskTypeOptions } from '@/constants/taskType'
+import { useSettingStore } from '@/stores/setting'
+import taskService from '@/services/task'
 
 const { t } = useI18n()
 const router = useRouter()
 const settingStore = useSettingStore()
 
-const taskTypeOptions = computed(() => {
-  return getTaskTypeOptions(settingStore.systemType)
-})
+const taskTypeOptions = computed(() => getTaskTypeOptions(settingStore.systemType))
 
 const isSubmitting = ref(false)
-const availableLocations = ref<Array<{ id: number; name: string; nodeRemark: string; group: string; isEmpty: boolean }>>([])
+const availableLocations = ref<Array<{
+  id: number
+  name: string
+  nodeRemark: string
+  group: string
+  laneCode: string
+  depthIndex: number
+  wattingNode: string
+  isEmpty: boolean
+  isLocked: boolean
+  enabled: boolean
+  materialCode: string | null
+  palletID: string | null
+  isReachableTarget: boolean
+  isRecommendedTarget: boolean
+  recommendationOrder: number | null
+}>>([])
 
 const sourceSearch = ref('')
 const targetSearch = ref('')
@@ -155,20 +169,20 @@ const targetSearch = ref('')
 const formState = reactive({
   sourcePosition: '',
   targetPosition: '',
-  materialCode: '', // Hidden but kept for compatibility
-  taskType: 0, 
-  priority: 1, 
+  materialCode: '',
+  taskType: 0,
+  priority: 1,
 })
 
-watch(() => taskTypeOptions.value, (newOptions) => {
-  if (newOptions && newOptions.length > 0) {
-    // Check if current value is valid
-    const isValid = newOptions.some(opt => opt.value === formState.taskType)
-    if (!isValid) {
+watch(
+  () => taskTypeOptions.value,
+  (newOptions) => {
+    if (newOptions.length > 0 && !newOptions.some(opt => opt.value === formState.taskType)) {
       formState.taskType = newOptions[0].value
     }
-  }
-}, { immediate: true })
+  },
+  { immediate: true }
+)
 
 onMounted(() => {
   fetchAvailableLocations()
@@ -187,54 +201,64 @@ const fetchAvailableLocations = async () => {
   }
 }
 
-// Filter Logic
-const filterLocations = (locations: any[], search: string) => {
-  if (!search) return locations
+const filterLocations = (locations: typeof availableLocations.value, search: string) => {
+  if (!search) {
+    return locations
+  }
+
   const lowerSearch = search.toLowerCase()
   return locations.filter(loc => {
-    const name = loc.name || ''
-    const remark = loc.nodeRemark || ''
-    const group = loc.group || ''
-    return name.toLowerCase().includes(lowerSearch) || 
-           remark.toLowerCase().includes(lowerSearch) ||
-           group.toLowerCase().includes(lowerSearch)
+    return [loc.name, loc.nodeRemark, loc.group, loc.laneCode]
+      .filter(Boolean)
+      .some(value => String(value).toLowerCase().includes(lowerSearch))
   })
 }
 
 const filteredSourceLocations = computed(() => {
-  return filterLocations(availableLocations.value, sourceSearch.value)
+  return filterLocations(
+    // Why: 人工创建任务页先放开起点选择，只保留“已被目标位占用不能重复选同一格”的基础防呆，
+    // 这样现场可直接手动指定起点，不再被空置/锁定状态提前阻断。
+    availableLocations.value.filter(loc => loc.enabled),
+    sourceSearch.value
+  )
 })
 
 const filteredTargetLocations = computed(() => {
-  return filterLocations(availableLocations.value, targetSearch.value)
+  return filterLocations(
+    availableLocations.value.filter(loc => loc.enabled),
+    targetSearch.value
+  ).sort((left, right) => {
+    const leftOrder = left.recommendationOrder ?? Number.MAX_SAFE_INTEGER
+    const rightOrder = right.recommendationOrder ?? Number.MAX_SAFE_INTEGER
+    return leftOrder - rightOrder
+  })
 })
 
-// Selection Handlers
-const selectSource = (loc: any) => {
+const selectSource = (loc: typeof availableLocations.value[number]) => {
   const val = loc.nodeRemark
   if (!val) {
     message.warning(t('task.noRemark'))
     return
   }
-  
+
   if (formState.targetPosition === val) {
     message.warning(t('task.targetOccupied'))
     return
   }
-  
-  if (formState.sourcePosition === val) {
-    formState.sourcePosition = '' // Deselect
-  } else {
-    formState.sourcePosition = val
-    // Optional: Auto-focus target search or scroll to target?
-  }
+
+  formState.sourcePosition = formState.sourcePosition === val ? '' : val
   checkDuplicate()
 }
 
-const selectTarget = (loc: any) => {
+const selectTarget = (loc: typeof availableLocations.value[number]) => {
   const val = loc.nodeRemark
   if (!val) {
     message.warning(t('task.noRemark'))
+    return
+  }
+
+  if (!loc.isReachableTarget) {
+    message.warning('外侧储位未占用时，当前深位储位不可达')
     return
   }
 
@@ -243,31 +267,27 @@ const selectTarget = (loc: any) => {
     return
   }
 
-  if (formState.targetPosition === val) {
-    formState.targetPosition = '' // Deselect
-  } else {
-    formState.targetPosition = val
-  }
+  formState.targetPosition = formState.targetPosition === val ? '' : val
   checkDuplicate()
 }
 
 const checkDuplicate = async () => {
-  if (formState.sourcePosition && formState.targetPosition) {
-    if (formState.sourcePosition === formState.targetPosition) {
-       message.error(t('task.samePositionError'));
-       return;
+  if (!formState.sourcePosition || !formState.targetPosition) {
+    return
+  }
+
+  if (formState.sourcePosition === formState.targetPosition) {
+    message.error(t('task.samePositionError'))
+    return
+  }
+
+  try {
+    const response = await taskService.checkDuplicateTask(formState.sourcePosition, formState.targetPosition)
+    if (response.success && response.data?.isDuplicate) {
+      message.warning(t('task.checkDuplicate'))
     }
-    try {
-      const response = await taskService.checkDuplicateTask(
-        formState.sourcePosition,
-        formState.targetPosition
-      )
-      if (response.success && response.data?.isDuplicate) {
-        message.warning(t('task.checkDuplicate'))
-      }
-    } catch (error: any) {
-      console.error('检查重复任务失败:', error)
-    }
+  } catch (error) {
+    console.error('检查重复任务失败:', error)
   }
 }
 
@@ -276,7 +296,7 @@ const handleSubmit = async () => {
     message.error(t('task.selectBothError'))
     return
   }
-  
+
   if (formState.sourcePosition === formState.targetPosition) {
     message.error(t('task.samePositionError'))
     return
@@ -287,7 +307,7 @@ const handleSubmit = async () => {
     const response = await taskService.createTask({
       sourcePosition: formState.sourcePosition,
       targetPosition: formState.targetPosition,
-      materialCode: '', // User requested no material input
+      materialCode: '',
       taskType: formState.taskType,
       priority: formState.priority,
     })
@@ -313,7 +333,7 @@ const handleCancel = () => {
 <style scoped>
 .task-create-container {
   width: 100%;
-  height: calc(100vh - 120px); /* Fill available height */
+  height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
 }
@@ -332,7 +352,6 @@ const handleCancel = () => {
   overflow: hidden;
 }
 
-/* Selection Summary */
 .selection-summary {
   display: flex;
   align-items: center;
@@ -383,7 +402,6 @@ const handleCancel = () => {
   font-weight: bold;
 }
 
-/* Panels */
 .task-create-form {
   display: flex;
   flex-direction: column;
@@ -395,8 +413,8 @@ const handleCancel = () => {
   display: flex;
   flex: 1;
   gap: 16px;
-  overflow: hidden; /* Ensure scrollbars are inside panels */
-  min-height: 0; /* Important for flex child scrolling */
+  overflow: hidden;
+  min-height: 0;
 }
 
 .panel {
@@ -426,17 +444,16 @@ const handleCancel = () => {
   overflow-y: auto;
   padding: 16px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: 12px;
   align-content: start;
 }
 
 .grid-item {
-  position: relative;
   background: #fff;
   border: 1px solid #e8e8e8;
   border-radius: 6px;
-  padding: 12px 6px;
+  padding: 10px 8px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
@@ -444,13 +461,13 @@ const handleCancel = () => {
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  min-height: 90px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+  min-height: 110px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .grid-item:hover:not(.disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   border-color: #1890ff;
   z-index: 1;
 }
@@ -466,10 +483,10 @@ const handleCancel = () => {
   background: #e6f7ff;
   border-color: #1890ff;
   border-width: 2px;
-  box-shadow: 0 2px 8px rgba(24,144,255,0.15);
+  box-shadow: 0 2px 8px rgba(24, 144, 255, 0.15);
 }
 
-.grid-item .loc-name {
+.loc-name {
   font-weight: 600;
   font-size: 13px;
   color: #333;
@@ -477,19 +494,17 @@ const handleCancel = () => {
   word-break: break-all;
 }
 
-.grid-item .loc-group {
-  font-size: 10px;
-  color: #888;
-  margin-bottom: 8px;
-  background: #f0f0f0;
-  padding: 2px 6px;
-  border-radius: 4px;
+.loc-group,
+.loc-depth {
+  font-size: 11px;
+  color: #666;
 }
 
 .loc-status {
   width: 100%;
   display: flex;
   justify-content: center;
+  margin-top: 8px;
 }
 
 .indicator {
@@ -517,14 +532,36 @@ const handleCancel = () => {
   border: 1px solid #b7eb8f;
 }
 
+.indicator.recommended {
+  background: #e6f4ff;
+  color: #0958d9;
+  border: 1px solid #91caff;
+}
+
+.indicator.blocked {
+  background: #fff7e6;
+  color: #d48806;
+  border: 1px solid #ffd591;
+}
+
 .grid-item.status-locked:not(.selected) {
   border-left: 3px solid #cf1322;
 }
+
 .grid-item.status-full:not(.selected) {
   border-left: 3px solid #08979c;
 }
+
 .grid-item.status-empty:not(.selected) {
   border-left: 3px solid #389e0d;
+}
+
+.grid-item.status-recommended:not(.selected) {
+  border-left: 3px solid #0958d9;
+}
+
+.grid-item.status-blocked:not(.selected) {
+  border-left: 3px solid #d48806;
 }
 
 .empty-state {
@@ -534,24 +571,25 @@ const handleCancel = () => {
   color: #999;
 }
 
-/* Actions */
 .form-actions {
   margin-top: 16px;
   display: flex;
   justify-content: center;
 }
 
-/* Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-track {
   background: #f1f1f1;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: #ccc;
   border-radius: 3px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: #999;
 }

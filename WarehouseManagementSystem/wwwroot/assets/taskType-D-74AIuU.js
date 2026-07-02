@@ -1,0 +1,1 @@
+const s={1:"上料",2:"下料",3:"空储位到上料架"},n={1:"运料",2:"取空托",3:"送空bin",4:"取满bin",5:"退料",100:"人工任务",101:"到线边"},o=(a,e)=>(e==="NDC"?n:s)[a]||`未知类型(${a})`,c=a=>Object.entries(a==="NDC"?n:s).map(([t,p])=>({value:Number(t),label:p}));export{c as a,o as g};

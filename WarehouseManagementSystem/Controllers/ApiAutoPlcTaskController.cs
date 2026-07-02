@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WarehouseManagementSystem.Db;
 using Dapper;
@@ -202,7 +202,8 @@ namespace WarehouseManagementSystem.Controllers
                     return NotFound(ApiResponseHelper.Failure("任务不存在"));
                 }
 
-                if (task.IsSend)
+                bool isSend = task.IsSend != null && Convert.ToInt32(task.IsSend) == 1;
+                if (isSend)
                 {
                     return BadRequest(ApiResponseHelper.Failure("已发送的任务不能删除"));
                 }

@@ -9,6 +9,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    path: '/pda-binding',
+    name: 'PdaBinding',
+    component: () => import('@/views/PdaBindingView.vue'),
+    meta: { requiresAuth: true, title: 'PDA扫码绑定' },
+  },
+  {
     path: '/',
     component: () => import('@/layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
@@ -102,6 +108,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Setting',
         component: () => import('@/views/SettingView.vue'),
         meta: { requiresAuth: true },
+      },
+      {
+        path: 'logs',
+        name: 'Logs',
+        component: () => import('@/views/LogCenterView.vue'),
+        meta: { requiresAuth: true, title: '日志中心' },
       },
     ],
   },

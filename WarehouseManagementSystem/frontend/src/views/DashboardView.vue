@@ -106,6 +106,9 @@
         </a-select>
         
         <a-button size="small" @click="refreshData">{{ $t('common.reset') }}</a-button>
+        <a-button type="primary" ghost size="small" @click="router.push('/pda-binding')">
+          {{ $t('dashboard.pdaBindingEntry') }}
+        </a-button>
 
         <a-radio-group v-model:value="viewMode" size="small" button-style="solid">
           <a-radio-button value="card">{{ $t('dashboard.cardView') }}</a-radio-button>
@@ -182,6 +185,8 @@
           <template #title>
             <div><strong>{{ location.nodeRemark }}</strong></div>
             <div v-if="location.group">{{ $t('dashboard.group') }}: {{ location.group }}</div>
+            <div v-if="location.laneCode">{{ $t('location.laneCode') }}: {{ location.laneCode }}</div>
+            <div v-if="location.depthIndex">{{ $t('location.depthIndex') }}: {{ location.depthIndex }}</div>
             <div v-if="!location.enabled">{{ $t('dashboard.status') }}: <span style="color: #ff4d4f">{{ $t('dashboard.disabled') }}</span></div>
             <div v-else-if="location.lock">{{ $t('dashboard.status') }}: <span style="color: #ff4d4f">{{ $t('dashboard.locked') }}</span></div>
             <div v-else-if="location.isEmpty">{{ $t('dashboard.status') }}: <span style="color: #52c41a">{{ $t('dashboard.available') }}</span></div>
@@ -198,6 +203,9 @@
               <div class="card-header">
                 <span class="location-name">{{ location.nodeRemark }}</span>
                 <span class="status-indicator"></span>
+              </div>
+              <div class="card-meta" v-if="location.laneCode || location.depthIndex">
+                {{ `${location.laneCode || '-'} / ${location.depthIndex || '-'}` }}
               </div>
               <div class="card-body" v-if="!location.isEmpty">
                 <div class="material-code" :title="location.materialCode">{{ location.materialCode }}</div>
@@ -843,6 +851,12 @@ const handleBatchToggleLock = (lockState: boolean) => {
   font-weight: 600;
   font-size: 12px;
   color: #333;
+}
+
+.card-meta {
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 2px;
 }
 
 .card-body {

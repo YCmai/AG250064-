@@ -21,23 +21,38 @@
         </a-row>
 
         <a-row :gutter="16">
-          <a-col :span="12">
+          <a-col :span="8">
             <a-form-item :label="t('location.group')" name="group">
               <a-input v-model:value="formState.group" :placeholder="t('location.inputGroup')" />
             </a-form-item>
           </a-col>
-          <a-col :span="12">
-            <a-form-item :label="t('location.waitingNode')" name="wattingNode">
-              <a-input v-model:value="formState.wattingNode" :placeholder="t('location.inputWaitingNode')" />
+          <a-col :span="8">
+            <a-form-item :label="t('location.laneCode')" name="laneCode">
+              <a-input v-model:value="formState.laneCode" :placeholder="t('location.inputLaneCode')" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
+            <a-form-item :label="t('location.depthIndex')" name="depthIndex">
+              <a-input-number
+                v-model:value="formState.depthIndex"
+                :placeholder="t('location.inputDepthIndex')"
+                :min="1"
+                style="width: 100%"
+              />
             </a-form-item>
           </a-col>
         </a-row>
 
         <a-row :gutter="16">
           <a-col :span="8">
+            <a-form-item :label="t('location.waitingNode')" name="wattingNode">
+              <a-input v-model:value="formState.wattingNode" :placeholder="t('location.inputWaitingNode')" />
+            </a-form-item>
+          </a-col>
+          <a-col :span="8">
             <a-form-item :label="t('location.liftingHeight')" name="liftingHeight">
-              <a-input-number 
-                v-model:value="formState.liftingHeight" 
+              <a-input-number
+                v-model:value="formState.liftingHeight"
                 :placeholder="t('location.inputLiftingHeight')"
                 :min="0"
                 style="width: 100%"
@@ -46,19 +61,9 @@
           </a-col>
           <a-col :span="8">
             <a-form-item :label="t('location.unloadHeight')" name="unloadHeight">
-              <a-input-number 
-                v-model:value="formState.unloadHeight" 
+              <a-input-number
+                v-model:value="formState.unloadHeight"
                 :placeholder="t('location.inputUnloadHeight')"
-                :min="0"
-                style="width: 100%"
-              />
-            </a-form-item>
-          </a-col>
-          <a-col :span="8">
-            <a-form-item :label="t('location.depth')" name="depth">
-              <a-input-number 
-                v-model:value="formState.depth" 
-                :placeholder="t('location.inputDepth')"
                 :min="0"
                 style="width: 100%"
               />
@@ -126,11 +131,11 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import locationService from '@/services/location'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useI18n } from 'vue-i18n'
+import locationService from '@/services/location'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -142,10 +147,11 @@ const formState = reactive({
   name: '',
   nodeRemark: '',
   group: '',
+  laneCode: '',
+  depthIndex: 1,
   wattingNode: '',
   liftingHeight: 0,
   unloadHeight: 0,
-  depth: 0,
   lock: false,
   enabled: true,
   materialCode: '',
@@ -159,13 +165,26 @@ const rules = computed(() => ({
   name: [{ required: true, message: t('location.nameRequired') }],
   nodeRemark: [{ required: true, message: t('location.nodeRemarkRequired') }],
   group: [{ required: true, message: t('location.groupRequired') }],
+  laneCode: [{ required: true, message: t('location.laneCodeRequired') }],
+  depthIndex: [
+    { required: true, message: t('location.depthIndexRequired') },
+    {
+      validator: async (_rule: unknown, value: number) => {
+        if (value > 0) {
+          return Promise.resolve()
+        }
+
+        return Promise.reject(new Error(t('location.depthIndexPositive')))
+      },
+    },
+  ],
 }))
 
 onMounted(() => {
   const locationId = route.params.id as string
   if (locationId) {
     isEdit.value = true
-    fetchLocationDetail(parseInt(locationId))
+    fetchLocationDetail(parseInt(locationId, 10))
   }
 })
 
@@ -177,10 +196,11 @@ const fetchLocationDetail = async (id: number) => {
       formState.name = data.name || ''
       formState.nodeRemark = data.nodeRemark || ''
       formState.group = data.group || ''
+      formState.laneCode = data.laneCode || ''
+      formState.depthIndex = data.depthIndex || 1
       formState.wattingNode = data.wattingNode || ''
       formState.liftingHeight = data.liftingHeight || 0
       formState.unloadHeight = data.unloadHeight || 0
-      formState.depth = data.depth || 0
       formState.lock = data.lock || false
       formState.enabled = data.enabled !== undefined ? data.enabled : true
       formState.materialCode = data.materialCode || ''
@@ -201,13 +221,18 @@ const fetchLocationDetail = async (id: number) => {
 const handleSubmit = async () => {
   isSubmitting.value = true
   try {
-    let response
-    if (isEdit.value) {
-      const locationId = route.params.id as string
-      response = await locationService.updateLocation(parseInt(locationId), formState)
-    } else {
-      response = await locationService.createLocation(formState)
+    const payload = {
+      ...formState,
+      name: formState.name.trim(),
+      nodeRemark: formState.nodeRemark.trim(),
+      group: formState.group.trim(),
+      laneCode: formState.laneCode.trim(),
+      wattingNode: formState.wattingNode.trim(),
     }
+
+    const response = isEdit.value
+      ? await locationService.updateLocation(parseInt(route.params.id as string, 10), payload)
+      : await locationService.createLocation(payload)
 
     if (response.success) {
       message.success(isEdit.value ? t('common.updateSuccess') : t('common.createSuccess'))

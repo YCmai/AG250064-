@@ -35,6 +35,12 @@ public class NdcLocation : NdcEntityBase<int>
     /// <summary>卸货/放置高度</summary>
     public int UnloadHeight { get; set; }
 
+    /// <summary>库道编号。用于表达同一巷道内的前后层级关系，而不是依赖储位名称解析。</summary>
+    public string? LaneCode { get; set; }
+
+    /// <summary>深度序号。1 表示最外侧，数值越大表示越靠里。</summary>
+    public int DepthIndex { get; set; }
+
     /// <summary>是否锁定 (1: 锁定, 0: 解锁)</summary>
     public bool Lock { get; set; }
 

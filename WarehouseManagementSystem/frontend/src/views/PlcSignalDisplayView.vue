@@ -119,7 +119,7 @@
                       <p><strong>{{ t('plc.writePermission') }}:</strong> {{ getSignal(device, col)?.writer || t('common.unknown') }}</p>
                       <p><strong>{{ t('plc.lastSignalUpdate') }}:</strong> {{ formatTime(getSignal(device, col)?.lastUpdateTime) }}</p>
                       <a-divider style="margin: 8px 0" />
-                      <a-space v-if="getSignal(device, col)?.writer !== 'PLC'">
+                      <a-space v-if="isManualWritableSignal(getSignal(device, col))">
                         <a-popconfirm :title="t('plc.confirmSetTrue')" @confirm="triggerSignal(getSignal(device, col)!.id, true)">
                           <a-button type="primary" size="small">{{ t('plc.setTrue') }}</a-button>
                         </a-popconfirm>
@@ -127,7 +127,7 @@
                           <a-button danger size="small">{{ t('plc.setFalse') }}</a-button>
                         </a-popconfirm>
                       </a-space>
-                      <a-alert v-else :message="t('plc.plcWriterWarning')" type="warning" show-icon style="padding: 4px 8px" />
+                      <a-alert v-else :message="t('plc.manualControlDisabledWarning')" type="warning" show-icon style="padding: 4px 8px" />
                     </div>
                   </template>
                   <div class="cell-content" :class="getSignalClass(device, col)">
@@ -176,6 +176,8 @@ interface PlcSignalStatus {
   writer?: string;
   lastUpdateTime?: string | null;
 }
+
+const MANUAL_WRITABLE_WRITER = 'WMS';
 
 const devices = ref<PlcDevice[]>([]);
 const allSignals = ref<PlcSignalStatus[]>([]);
@@ -355,6 +357,10 @@ const triggerSignal = async (signalId: number, value: boolean) => {
   } catch (_error) {
     message.error(t('common.fail'));
   }
+};
+
+const isManualWritableSignal = (signal?: PlcSignalStatus) => {
+  return !!signal && (signal.writer || '').toUpperCase() === MANUAL_WRITABLE_WRITER;
 };
 
 const getSignal = (device: PlcDevice, signalName: string) => {

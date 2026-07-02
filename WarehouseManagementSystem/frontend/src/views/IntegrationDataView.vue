@@ -101,7 +101,22 @@
           :scroll="{ x: 1200 }"
         >
           <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'createTime'">{{ formatDate(record.createTime) }}</template>
+            <template v-if="column.key === 'taskType'">
+              <a-tag color="blue">{{ getAgvCommandTaskTypeText(record.taskType) }}</a-tag>
+            </template>
+            <template v-else-if="column.key === 'processStatus'">
+              <a-tag :color="getProcessStatusColor(record.processStatus)">
+                {{ getAgvCommandItemProcessStatusText(record.processStatus) }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'taskStatus'">
+              <a-tag :color="getTaskExecutionStatusInfo(record.taskStatus).color">
+                {{ getTaskExecutionStatusInfo(record.taskStatus).text }}
+              </a-tag>
+            </template>
+            <template v-else-if="column.key === 'createTime'">{{ formatDate(record.createTime) }}</template>
+            <template v-else-if="column.key === 'updateTime'">{{ formatDate(record.updateTime) }}</template>
+            <template v-else-if="column.key === 'processTime'">{{ formatDate(record.processTime) }}</template>
           </template>
         </a-table>
       </a-tab-pane>
@@ -255,8 +270,11 @@ import integrationDataService, {
   WorkOrderRow
 } from '@/services/integrationData'
 import { useI18n } from 'vue-i18n'
+import { getStatusInfo } from '@/constants/taskStatus'
+import { useSettingStore } from '@/stores/setting'
 
 const { t } = useI18n()
+const settingStore = useSettingStore()
 const activeTab = ref('workOrders')
 const loading = ref(false)
 
@@ -333,12 +351,19 @@ const itemColumns = computed(() => [
   { title: t('integrationData.inboxId'), dataIndex: 'inboxId', width: 100 },
   { title: t('integrationData.taskNumber'), dataIndex: 'taskNumber', width: 180 },
   { title: t('integrationData.seq'), dataIndex: 'seq', width: 80 },
-  { title: t('integrationData.taskType'), dataIndex: 'taskType', width: 100 },
+  { title: t('integrationData.taskType'), key: 'taskType', width: 130 },
+  { title: t('integrationData.processStatus'), key: 'processStatus', width: 130 },
+  { title: t('task.status'), key: 'taskStatus', width: 140 },
   { title: t('integrationData.fromStation'), dataIndex: 'fromStation', width: 160 },
   { title: t('integrationData.toStation'), dataIndex: 'toStation', width: 160 },
   { title: t('integrationData.palletNumber'), dataIndex: 'palletNumber', width: 160 },
   { title: t('integrationData.binNumber'), dataIndex: 'binNumber', width: 160 },
-  { title: t('common.createTime'), key: 'createTime', width: 180 }
+  { title: t('integrationData.requestCode'), dataIndex: 'requestCode', width: 220 },
+  { title: t('integrationData.userTaskId'), dataIndex: 'userTaskId', width: 120 },
+  { title: t('common.createTime'), key: 'createTime', width: 180 },
+  { title: t('common.updateTime'), key: 'updateTime', width: 180 },
+  { title: t('integrationData.processTime'), key: 'processTime', width: 180 },
+  { title: t('integrationData.errorMsg'), dataIndex: 'errorMsg', width: 260 }
 ])
 
 const outboundColumns = computed(() => [
@@ -539,6 +564,13 @@ const getOutboundProcessStatusText = (status: number) => {
   return `${status}`
 }
 
+const getAgvCommandItemProcessStatusText = (status: number) => {
+  if (status === 0) return t('integrationData.pending')
+  if (status === 1) return t('integrationData.processed')
+  if (status === 2) return t('integrationData.failed')
+  return `${status}`
+}
+
 const getProcessStatusColor = (status: number) => {
   if (status === 0) return 'processing'
   if (status === 1) return 'success'
@@ -552,6 +584,23 @@ const getEventTypeText = (eventType: number) => {
   if (eventType === 2) return t('integrationData.eventType2')
   if (eventType === 3) return t('integrationData.eventType3')
   return `${eventType}`
+}
+
+const getAgvCommandTaskTypeText = (taskType: number) => {
+  if (taskType === 1) return t('integrationData.agvTaskType1')
+  if (taskType === 2) return t('integrationData.agvTaskType2')
+  if (taskType === 3) return t('integrationData.agvTaskType3')
+  if (taskType === 4) return t('integrationData.agvTaskType4')
+  if (taskType === 5) return t('integrationData.agvTaskType5')
+  return `${taskType}`
+}
+
+const getTaskExecutionStatusInfo = (taskStatus?: number | null) => {
+  if (taskStatus === undefined || taskStatus === null) {
+    return { text: '-', color: 'default' }
+  }
+
+  return getStatusInfo(taskStatus, settingStore.systemType)
 }
 
 const resetOutboundForm = () => {

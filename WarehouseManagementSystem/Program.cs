@@ -54,8 +54,10 @@ Log.Logger = new LoggerConfiguration()
 
 builder.Host.UseSerilog();
 
+builder.Services.AddScoped<ILocationRepository, LocationRepository>();
 builder.Services.AddScoped<ILocationService, LocationService>();
 builder.Services.AddScoped<ITaskService, TaskService>();
+builder.Services.AddScoped<IUserTaskCreationService, UserTaskCreationService>();
 builder.Services.AddSingleton<IDatabaseService, DatabaseService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
@@ -75,9 +77,13 @@ builder.Services.AddScoped<IRcsLocationService, RcsLocationService>();
 builder.Services.AddScoped<IRcsInteractionService, RcsInteractionService>();
 
 builder.Services.AddSingleton<IServiceToggleService, ServiceToggleService>();
-builder.Services.AddSingleton<IAgvIntegrationService, AgvIntegrationService>();
+builder.Services.AddScoped<IAgvIntegrationService, AgvIntegrationService>();
+builder.Services.AddScoped<IPdaBindingRepository, PdaBindingRepository>();
+builder.Services.AddScoped<IPdaBindingService, PdaBindingService>();
 builder.Services.AddScoped<IAgvOutboundQueueRepository, AgvOutboundQueueRepository>();
 builder.Services.AddScoped<IAgvOutboundInteractionService, AgvOutboundInteractionService>();
+builder.Services.AddScoped<IAgvSafetyHandshakeRepository, AgvSafetyHandshakeRepository>();
+builder.Services.AddScoped<IAgvSafetyInteractionService, AgvSafetyInteractionService>();
 
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("Jwt:SecretKey is not configured.");
@@ -132,7 +138,6 @@ builder.Services.AddHostedService<PlcTaskProcessor>();
 builder.Services.AddHostedService<HeartbeatService>();
 
 builder.Services.AddHostedService<ApiTaskProcessorService>();
-builder.Services.AddHostedService<AgvCommandInboxProcessorService>();
 //接口反馈，安全信号，后台消费线程（每2秒扫一次）
 builder.Services.AddHostedService<AgvOutboundProcessorService>();
 // NDC/RCS 迁移后的后台服务。

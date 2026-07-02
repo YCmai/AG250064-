@@ -12,6 +12,7 @@ namespace WarehouseManagementSystem.Models.PLC
         /// </summary>
         public static readonly List<HeartbeatDeviceConfig> Devices = new List<HeartbeatDeviceConfig>
         {
+            new HeartbeatDeviceConfig { IpAddress = "192.168.0.100", ModuleAddress = "DB1", SignalRemark = "中控心跳", SignalName = "心跳/中控心跳" },
             new HeartbeatDeviceConfig { IpAddress = "192.168.40.1", ModuleAddress = "DB126" },
             new HeartbeatDeviceConfig { IpAddress = "192.168.40.2", ModuleAddress = "DB126" },
             new HeartbeatDeviceConfig { IpAddress = "192.168.60.180", ModuleAddress = "" },
@@ -41,5 +42,17 @@ namespace WarehouseManagementSystem.Models.PLC
         /// 模块地址
         /// </summary>
         public string ModuleAddress { get; set; }
+
+        /// <summary>
+        /// 心跳信号备注。
+        /// 当现场信号名称调整但备注保持不变时，优先按备注定位更稳妥。
+        /// </summary>
+        public string SignalRemark { get; set; }
+
+        /// <summary>
+        /// 心跳信号名称。
+        /// 作为备注匹配失败时的兜底条件。
+        /// </summary>
+        public string SignalName { get; set; }
     }
 } 

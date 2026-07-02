@@ -13,6 +13,10 @@ namespace WarehouseManagementSystem.Services
         public const string IOProcessorEnabled = "IOProcessorEnabled";
         public const string PlcCommunicationEnabled = "PlcCommunicationEnabled";
         public const string ApiTaskProcessorEnabled = "ApiTaskProcessorEnabled";
+        public const string TabletFeedSourcePosition = "TabletFeedSourcePosition";
+        public const string TabletFeedTargetPosition = "TabletFeedTargetPosition";
+        public const string MesTaskType2TargetGroup = "MesTaskType2TargetGroup";
+        public const string MesTaskType4TargetGroup = "MesTaskType4TargetGroup";
     }
 
     public interface IServiceToggleService
@@ -40,7 +44,11 @@ namespace WarehouseManagementSystem.Services
                 ["Language"] = ("zh-CN", "系统语言"),
                 [ServiceSettingKeys.IOProcessorEnabled] = ("true", "是否启用 IO 服务"),
                 [ServiceSettingKeys.PlcCommunicationEnabled] = ("true", "是否启用 PLC 服务（含通讯、任务处理、心跳）"),
-                [ServiceSettingKeys.ApiTaskProcessorEnabled] = ("true", "是否启用接口任务处理服务")
+                [ServiceSettingKeys.ApiTaskProcessorEnabled] = ("true", "是否启用接口任务处理服务"),
+                [ServiceSettingKeys.TabletFeedSourcePosition] = ("PDA_BUFFER_IN", "平板送料任务默认起点"),
+                [ServiceSettingKeys.TabletFeedTargetPosition] = ("LINE_SIDE_BUFFER", "平板送料任务默认终点"),
+                [ServiceSettingKeys.MesTaskType2TargetGroup] = ("空托回收处", "MES任务类型2在未传终点时使用的默认目标区域（RCS_Locations.Group）"),
+                [ServiceSettingKeys.MesTaskType4TargetGroup] = ("BIN暂存间", "MES任务类型4在未传终点时使用的默认目标区域（RCS_Locations.Group）")
             };
 
         private readonly IDatabaseService _databaseService;

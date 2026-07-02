@@ -22,9 +22,11 @@ public interface IAgvOutboundInteractionService
     Task NotifyJobCompletedAsync(string taskNumber, int status, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 入队“安全信号”。
+    /// 入队“PDA 绑定完成回传”。
     /// </summary>
-    Task NotifySafetySignalAsync(string taskNumber, DateTime requestDate, string room, CancellationToken cancellationToken = default);
+    Task<(bool Success, string ErrorMessage)> NotifyPdaBindingCompletedAsync(
+        RCS_PdaTaskBinding binding,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 处理统一出站表中的待发送记录。
@@ -38,8 +40,8 @@ public interface IAgvOutboundInteractionService
 public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionService
 {
     private const string MaterialArrivedEndpointKey = "AgvUpstream:MaterialArrivedEndpoint";
-    private const string SafetySignalEndpointKey = "AgvUpstream:SafetySignalEndpoint";
     private const string JobCompletedEndpointKey = "AgvUpstream:JobCompletedEndpoint";
+    private const string PdaBindingCompletedEndpointKey = "AgvUpstream:PdaBindingCompletedEndpoint";
 
     private readonly IAgvOutboundQueueRepository _queueRepository;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -120,40 +122,95 @@ public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionServi
         await EnqueueAsync((int)AgvOutboundEventType.JobCompleted, businessKey, normalizedTaskNumber, payload, cancellationToken);
     }
 
-    public async Task NotifySafetySignalAsync(string taskNumber, DateTime requestDate, string room, CancellationToken cancellationToken = default)
+    public async Task<(bool Success, string ErrorMessage)> NotifyPdaBindingCompletedAsync(
+        RCS_PdaTaskBinding binding,
+        CancellationToken cancellationToken = default)
     {
-        var normalizedTaskNumber = taskNumber?.Trim();
-        var normalizedRoom = room?.Trim();
-
-        if (string.IsNullOrWhiteSpace(normalizedTaskNumber) || string.IsNullOrWhiteSpace(normalizedRoom))
+        if (binding == null)
         {
-            _logger.LogWarning("跳过安全信号入队：taskNumber或room为空");
-            return;
+            return (false, "PDA绑定记录不能为空");
+        }
+
+        var orderNumber = binding.OrderNumber?.Trim();
+        var palletNumber = binding.PalletNumber?.Trim();
+        var barcode = binding.Barcode?.Trim();
+        var requestCode = binding.RequestCode?.Trim();
+
+        if (string.IsNullOrWhiteSpace(orderNumber) ||
+            string.IsNullOrWhiteSpace(palletNumber) ||
+            string.IsNullOrWhiteSpace(barcode) ||
+            string.IsNullOrWhiteSpace(requestCode))
+        {
+            return (false, "PDA绑定回传字段不完整");
         }
 
         var payload = new
         {
-            taskNumber = normalizedTaskNumber,
-            requestDate = requestDate.ToString("yyyy-MM-dd HH:mm:ss"),
-            room = normalizedRoom
+            orderNumber,
+            palletNumber,
+            items = new[]
+            {
+                new
+                {
+                    barcode
+                }
+            }
         };
 
-        var businessKey = $"safe:{normalizedTaskNumber}:{requestDate:yyyyMMddHHmmss}:{normalizedRoom}";
-        await EnqueueAsync((int)AgvOutboundEventType.SafetySignal, businessKey, normalizedTaskNumber, payload, cancellationToken);
+        var businessKey = $"pda-binding:{orderNumber}:{palletNumber}:{barcode}:{requestCode}";
+
+        try
+        {
+            var exists = await _queueRepository.ExistsByBusinessKeyAsync(businessKey, cancellationToken);
+            if (exists)
+            {
+                _logger.LogInformation(
+                    "PDA绑定完成回传入队跳过：已存在相同业务键。RequestCode={RequestCode}, BusinessKey={BusinessKey}",
+                    requestCode,
+                    businessKey);
+                return (true, string.Empty);
+            }
+
+            await EnqueueAsync(
+                (int)AgvOutboundEventType.PdaBindingCompleted,
+                businessKey,
+                requestCode,
+                payload,
+                cancellationToken);
+
+            return (true, string.Empty);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PDA绑定完成回传入队失败，RequestCode={RequestCode}", requestCode);
+            return (false, ex.Message);
+        }
     }
 
     public async Task<int> ProcessPendingAsync(int batchSize, CancellationToken cancellationToken = default)
     {
         var maxRetryCount = _configuration.GetValue<int?>("AgvUpstream:MaxRetryCount") ?? 10;
-        var tasks = await _queueRepository.GetPendingAsync(batchSize, maxRetryCount, DateTime.Now, cancellationToken);
+        var pendingTasks = await LoadPendingOutboundTasksAsync(batchSize, maxRetryCount, cancellationToken);
 
-        foreach (var item in tasks)
+        foreach (var pendingTask in pendingTasks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await ProcessSingleAsync(item, maxRetryCount, cancellationToken);
+            await DispatchOutboundTaskAsync(pendingTask, maxRetryCount, cancellationToken);
         }
 
-        return tasks.Count;
+        return pendingTasks.Count;
+    }
+
+    /// <summary>
+    /// Why: 后台线程本质上只是“按批次取待发送任务”，把取数动作单独提出来后，
+    /// 现场后续如果想改批次大小、查询条件或切换到 ECS 表，优先只需要看这里。
+    /// </summary>
+    private Task<List<RCS_AgvOutboundQueue>> LoadPendingOutboundTasksAsync(
+        int batchSize,
+        int maxRetryCount,
+        CancellationToken cancellationToken)
+    {
+        return _queueRepository.GetPendingAsync(batchSize, maxRetryCount, DateTime.Now, cancellationToken);
     }
 
     /// <summary>
@@ -205,58 +262,73 @@ public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionServi
     }
 
     /// <summary>
-    /// 处理单条出站记录：发送成功标记完成，发送失败回写错误并计算下次重试时间。
+    /// Why: 出站线程的主干逻辑应该让人一眼看懂，就是“按表中类型分发接口，再按结果回写状态”。
+    /// 因此这里不再把分发、发送、回写混在一起，后续维护者重点只需要看这个方法。
     /// </summary>
-    private async Task ProcessSingleAsync(RCS_AgvOutboundQueue item, int maxRetryCount, CancellationToken cancellationToken)
+    private async Task DispatchOutboundTaskAsync(
+        RCS_AgvOutboundQueue item,
+        int maxRetryCount,
+        CancellationToken cancellationToken)
     {
         if (item.RetryCount >= maxRetryCount)
         {
-            await _queueRepository.MarkAbandonedAsync(
-                item.ID,
-                item.RetryCount,
-                item.LastError,
-                DateTime.Now,
-                cancellationToken);
-            return;
-        }
-
-        var endpoint = GetEndpointByEventType(item.EventType);
-        if (string.IsNullOrWhiteSpace(endpoint))
-        {
-            await MarkFailedWithRetryPolicyAsync(
+            await UpdateOutboundTaskResultAsync(
                 item,
+                new OutboundDispatchResult(false, item.LastError, true),
                 maxRetryCount,
-                $"接口未配置，EventType={item.EventType}",
                 cancellationToken);
             return;
         }
 
-        var sendResult = await PostWithAckAsync(endpoint, item.RequestBody, cancellationToken);
-        if (sendResult.Success)
+        var dispatchTarget = ResolveDispatchTarget(item.EventType);
+        if (!dispatchTarget.IsValid)
+        {
+            await UpdateOutboundTaskResultAsync(
+                item,
+                new OutboundDispatchResult(false, dispatchTarget.ErrorMessage),
+                maxRetryCount,
+                cancellationToken);
+            return;
+        }
+
+        var dispatchResult = await SendOutboundRequestAsync(dispatchTarget.Endpoint, item.RequestBody, cancellationToken);
+        await UpdateOutboundTaskResultAsync(item, dispatchResult, maxRetryCount, cancellationToken);
+    }
+
+    /// <summary>
+    /// Why: 这里统一根据发送结果回写表状态。
+    /// 成功、失败待重试、失败终态三种分支都在这一处，后续查历史或改重试策略也更集中。
+    /// </summary>
+    private async Task UpdateOutboundTaskResultAsync(
+        RCS_AgvOutboundQueue item,
+        OutboundDispatchResult dispatchResult,
+        int maxRetryCount,
+        CancellationToken cancellationToken)
+    {
+        if (dispatchResult.Success)
         {
             await _queueRepository.MarkSuccessAsync(item.ID, DateTime.Now, cancellationToken);
             return;
         }
 
-        await MarkFailedWithRetryPolicyAsync(item, maxRetryCount, sendResult.ErrorMsg, cancellationToken);
-    }
+        if (dispatchResult.MarkAsAbandoned || item.RetryCount >= maxRetryCount)
+        {
+            await _queueRepository.MarkAbandonedAsync(
+                item.ID,
+                item.RetryCount,
+                dispatchResult.ErrorMessage,
+                DateTime.Now,
+                cancellationToken);
+            return;
+        }
 
-    /// <summary>
-    /// 失败回写策略：未达上限标记为“失败待重试(2)”，达到上限标记为“失败终态(3)”。
-    /// </summary>
-    private async Task MarkFailedWithRetryPolicyAsync(
-        RCS_AgvOutboundQueue item,
-        int maxRetryCount,
-        string errorMsg,
-        CancellationToken cancellationToken)
-    {
         var nextRetryCount = item.RetryCount + 1;
         if (nextRetryCount >= maxRetryCount)
         {
             await _queueRepository.MarkAbandonedAsync(
                 item.ID,
                 nextRetryCount,
-                errorMsg,
+                dispatchResult.ErrorMessage,
                 DateTime.Now,
                 cancellationToken);
             return;
@@ -266,15 +338,46 @@ public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionServi
         await _queueRepository.MarkFailedAsync(
             item.ID,
             nextRetryCount,
-            errorMsg,
+            dispatchResult.ErrorMessage,
             DateTime.Now.AddSeconds(nextRetrySeconds),
             cancellationToken);
     }
 
     /// <summary>
+    /// Why: 表里只有事件类型，没有复杂流程。
+    /// 所以这里就直接做“类型 -> 接口地址”的简单分发，保持和现场理解一致。
+    /// </summary>
+    private DispatchTarget ResolveDispatchTarget(int eventType)
+    {
+        var endpointKey = eventType switch
+        {
+            (int)AgvOutboundEventType.MaterialArrived => MaterialArrivedEndpointKey,
+            (int)AgvOutboundEventType.JobCompleted => JobCompletedEndpointKey,
+            (int)AgvOutboundEventType.PdaBindingCompleted => PdaBindingCompletedEndpointKey,
+            _ => string.Empty
+        };
+
+        if (string.IsNullOrWhiteSpace(endpointKey))
+        {
+            return DispatchTarget.Fail($"不支持的事件类型，EventType={eventType}");
+        }
+
+        var endpoint = (_configuration[endpointKey] ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            return DispatchTarget.Fail($"接口未配置，EventType={eventType}");
+        }
+
+        return DispatchTarget.Ok(endpoint);
+    }
+
+    /// <summary>
     /// 发送 HTTP 请求并依据 flag（0成功，-1失败）解析上位机回包。
     /// </summary>
-    private async Task<(bool Success, string ErrorMsg)> PostWithAckAsync(string endpoint, string requestBody, CancellationToken cancellationToken)
+    private async Task<OutboundDispatchResult> SendOutboundRequestAsync(
+        string endpoint,
+        string requestBody,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -288,7 +391,7 @@ public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionServi
 
             if (!response.IsSuccessStatusCode)
             {
-                return (false, $"HttpStatus={(int)response.StatusCode}, Body={responseText}");
+                return new OutboundDispatchResult(false, $"HttpStatus={(int)response.StatusCode}, Body={responseText}");
             }
 
             AgvUpstreamAckResponse? ack;
@@ -298,40 +401,24 @@ public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionServi
             }
             catch
             {
-                return (false, $"响应JSON解析失败, Body={responseText}");
+                return new OutboundDispatchResult(false, $"响应JSON解析失败, Body={responseText}");
             }
 
             if (ack?.Flag == 0)
             {
-                return (true, string.Empty);
+                return new OutboundDispatchResult(true, string.Empty);
             }
 
-            return (false, $"Flag={ack?.Flag}, ErrorMsg={ack?.ErrorMsg}");
+            return new OutboundDispatchResult(false, $"Flag={ack?.Flag}, ErrorMsg={ack?.ErrorMsg}");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return (false, "请求超时");
+            return new OutboundDispatchResult(false, "请求超时");
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            return new OutboundDispatchResult(false, ex.Message);
         }
-    }
-
-    /// <summary>
-    /// 根据事件类型读取对应的上位机配置地址。
-    /// </summary>
-    private string GetEndpointByEventType(int eventType)
-    {
-        var key = eventType switch
-        {
-            (int)AgvOutboundEventType.MaterialArrived => MaterialArrivedEndpointKey,
-            (int)AgvOutboundEventType.SafetySignal => SafetySignalEndpointKey,
-            (int)AgvOutboundEventType.JobCompleted => JobCompletedEndpointKey,
-            _ => string.Empty
-        };
-
-        return string.IsNullOrWhiteSpace(key) ? string.Empty : (_configuration[key] ?? string.Empty).Trim();
     }
 
     /// <summary>
@@ -369,6 +456,15 @@ public sealed class AgvOutboundInteractionService : IAgvOutboundInteractionServi
         public int Flag { get; set; }
         public string ErrorMsg { get; set; } = string.Empty;
     }
+
+    private sealed record DispatchTarget(bool IsValid, string Endpoint, string ErrorMessage)
+    {
+        public static DispatchTarget Ok(string endpoint) => new(true, endpoint, string.Empty);
+
+        public static DispatchTarget Fail(string errorMessage) => new(false, string.Empty, errorMessage);
+    }
+
+    private sealed record OutboundDispatchResult(bool Success, string ErrorMessage, bool MarkAsAbandoned = false);
 }
 
 /// <summary>
@@ -378,8 +474,8 @@ public enum AgvOutboundEventType
 {
     /// <summary>物料达到生产线信息。</summary>
     MaterialArrived = 1,
-    /// <summary>安全信号。</summary>
-    SafetySignal = 2,
     /// <summary>作业完成反馈。</summary>
-    JobCompleted = 3
+    JobCompleted = 3,
+    /// <summary>PDA 绑定完成回传。</summary>
+    PdaBindingCompleted = 4
 }

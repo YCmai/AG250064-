@@ -5,7 +5,10 @@ public enum TaskTypeEnum
     In = 1, // 入库任务
     Out = 2, // 出库任务
     ParentPallet = 3, // 母托盘/空托盘出入库
-    Transfer = 4 // 搬运转移任务
+    Transfer = 4, // 搬运转移任务
+    Return = 5, // 退料任务（按 MES 原样落库保留）
+    Manual = 100, // 人工创建任务
+    FeedToLineSide = 101 // 到线边/平板送料任务
 }
 
 public enum TaskStatuEnum

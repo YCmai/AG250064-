@@ -1,6 +1,7 @@
 using Dapper;
 using WarehouseManagementSystem.Models.DTOs.Integrations;
 using WarehouseManagementSystem.Db;
+using WarehouseManagementSystem.Services.Tasks;
 
 namespace WarehouseManagementSystem.Services.Integrations;
 
@@ -18,20 +19,19 @@ public interface IAgvIntegrationService
     Task<AgvPersistResult> SaveWorkOrderAsync(AgvWorkOrderRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 将 AGV 指令写入收件箱主子表（<c>RCS_AgvCommandInbox</c> / <c>RCS_AgvCommandInboxItems</c>）。
+    /// 将 AGV 指令写入收件箱主子表（<c>RCS_AgvCommandInbox</c> / <c>RCS_AgvCommandInboxItems</c>），
+    /// 并在同一主流程内直接拆分生成 <c>RCS_UserTasks</c>。
     /// </summary>
     /// <param name="request">AGV 指令请求。</param>
     /// <param name="cancellationToken">取消令牌。</param>
-    /// <returns>入箱结果。</returns>
-    Task<AgvPersistResult> EnqueueAgvCommandAsync(AgvCommandRequest request, CancellationToken cancellationToken = default);
+    /// <returns>处理结果。</returns>
+    Task<AgvPersistResult> ReceiveAndCreateUserTasksAsync(AgvCommandRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 处理待消费的 AGV 指令收件箱记录，并转换到 <c>RCS_UserTasks</c>。
+    /// 返回 AGV 指令任务下发主链路描述。
     /// </summary>
-    /// <param name="batchSize">单批处理数量上限。</param>
-    /// <param name="cancellationToken">取消令牌。</param>
-    /// <returns>本次扫描并处理的收件箱记录数量。</returns>
-    Task<int> ProcessPendingCommandInboxAsync(int batchSize, CancellationToken cancellationToken = default);
+    /// <returns>统一链路说明。</returns>
+    string DescribeAgvCommandDispatchFlow();
 }
 
 /// <summary>
@@ -68,11 +68,16 @@ public sealed class AgvPersistResult
 public class AgvIntegrationService : IAgvIntegrationService
 {
     private readonly IDatabaseService _db;
+    private readonly IUserTaskCreationService _userTaskCreationService;
     private readonly ILogger<AgvIntegrationService> _logger;
 
-    public AgvIntegrationService(IDatabaseService db, ILogger<AgvIntegrationService> logger)
+    public AgvIntegrationService(
+        IDatabaseService db,
+        IUserTaskCreationService userTaskCreationService,
+        ILogger<AgvIntegrationService> logger)
     {
         _db = db;
+        _userTaskCreationService = userTaskCreationService;
         _logger = logger;
     }
 
@@ -155,7 +160,7 @@ public class AgvIntegrationService : IAgvIntegrationService
         }
     }
 
-    public async Task<AgvPersistResult> EnqueueAgvCommandAsync(AgvCommandRequest request, CancellationToken cancellationToken = default)
+    public async Task<AgvPersistResult> ReceiveAndCreateUserTasksAsync(AgvCommandRequest request, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -260,7 +265,14 @@ public class AgvIntegrationService : IAgvIntegrationService
                 FromStation,
                 ToStation,
                 TaskType,
-                CreateTime
+                RequestCode,
+                ProcessStatus,
+                TaskStatus,
+                ErrorMsg,
+                UserTaskId,
+                CreateTime,
+                UpdateTime,
+                ProcessTime
             )
             VALUES
             (
@@ -271,7 +283,14 @@ public class AgvIntegrationService : IAgvIntegrationService
                 @FromStation,
                 @ToStation,
                 @TaskType,
-                @CreateTime
+                @RequestCode,
+                @ProcessStatus,
+                @TaskStatus,
+                @ErrorMsg,
+                @UserTaskId,
+                @CreateTime,
+                @UpdateTime,
+                @ProcessTime
             );";
 
             foreach (var item in request.Items.OrderBy(x => x.Seq))
@@ -287,187 +306,125 @@ public class AgvIntegrationService : IAgvIntegrationService
                         FromStation = string.IsNullOrWhiteSpace(item.FromStation) ? null : item.FromStation.Trim(),
                         ToStation = item.ToStation!.Trim(),
                         TaskType = item.TaskType!.Value,
-                        CreateTime = now
+                        RequestCode = (string?)null,
+                        ProcessStatus = 0,
+                        TaskStatus = (int?)null,
+                        ErrorMsg = string.Empty,
+                        UserTaskId = (int?)null,
+                        CreateTime = now,
+                        UpdateTime = now,
+                        ProcessTime = (DateTime?)null
                     },
                     transaction,
                     cancellationToken: cancellationToken));
             }
 
+            var inboxHeader = new InboxHeader
+            {
+                ID = inboxId,
+                TaskNumber = normalizedTaskNumber,
+                Priority = request.Priority!.Value
+            };
+
+            var inboxItems = request.Items
+                .OrderBy(x => x.Seq)
+                .Select(item => new InboxItem
+                {
+                    InboxId = inboxId,
+                    Seq = item.Seq,
+                    PalletNumber = string.IsNullOrWhiteSpace(item.PalletNumber) ? null : item.PalletNumber.Trim(),
+                    BinNumber = string.IsNullOrWhiteSpace(item.BinNumber) ? null : item.BinNumber.Trim(),
+                    FromStation = string.IsNullOrWhiteSpace(item.FromStation) ? null : item.FromStation.Trim(),
+                    ToStation = item.ToStation!.Trim(),
+                    TaskType = item.TaskType!.Value,
+                    ProcessStatus = 0
+                })
+                .ToList();
+
+            var failedItemMessages = new List<string>();
+
+            foreach (var item in inboxItems)
+            {
+                var requestCode = $"{normalizedTaskNumber}_{item.Seq:D3}";
+
+                try
+                {
+                    var unifiedCreateRequest = BuildUnifiedMesTaskCreationRequest(inboxHeader, item, requestCode);
+                    var createResult = await _userTaskCreationService.CreateTaskAsync(
+                        unifiedCreateRequest,
+                        connection,
+                        transaction,
+                        cancellationToken);
+
+                    if (!createResult.Success)
+                    {
+                        failedItemMessages.Add($"seq={item.Seq}: {createResult.Message}");
+                        await MarkInboxItemFailedByInboxAsync(
+                            connection,
+                            inboxId,
+                            item.Seq,
+                            requestCode,
+                            createResult.Message,
+                            transaction,
+                            cancellationToken);
+                        continue;
+                    }
+
+                    await MarkInboxItemSuccessByInboxAsync(
+                        connection,
+                        inboxId,
+                        item.Seq,
+                        requestCode,
+                        createResult.TaskId,
+                        createResult.TaskStatus,
+                        transaction,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "处理AGV指令明细失败，TaskNumber={TaskNumber}, Seq={Seq}", normalizedTaskNumber, item.Seq);
+                    var itemErrorMessage = $"创建任务异常: {ex.Message}";
+                    failedItemMessages.Add($"seq={item.Seq}: {itemErrorMessage}");
+
+                    await MarkInboxItemFailedByInboxAsync(
+                        connection,
+                        inboxId,
+                        item.Seq,
+                        requestCode,
+                        itemErrorMessage,
+                        transaction,
+                        cancellationToken);
+                }
+            }
+
+            if (failedItemMessages.Count > 0)
+            {
+                var headerErrorMessage = failedItemMessages.Count == inboxItems.Count
+                    ? $"全部明细处理失败：{string.Join(" | ", failedItemMessages)}"
+                    : $"部分明细处理失败：{string.Join(" | ", failedItemMessages)}";
+
+                await MarkInboxFailedAsync(connection, inboxId, headerErrorMessage, transaction, cancellationToken);
+                transaction.Commit();
+                return AgvPersistResult.Failed(headerErrorMessage);
+            }
+
+            await MarkInboxSuccessAsync(connection, inboxId, transaction, cancellationToken);
             transaction.Commit();
             return AgvPersistResult.Success();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "写入AGV指令Inbox失败，TaskNumber={TaskNumber}", request.TaskNumber);
-            return AgvPersistResult.Failed("AGV指令入库失败");
+            _logger.LogError(ex, "接收并创建AGV任务失败，TaskNumber={TaskNumber}", request.TaskNumber);
+            return AgvPersistResult.Failed("AGV指令处理失败");
         }
     }
 
-    public async Task<int> ProcessPendingCommandInboxAsync(int batchSize, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// 统一返回 AGV 指令从接口接收到最终创建 RCS_UserTasks 的链路。
+    /// </summary>
+    public string DescribeAgvCommandDispatchFlow()
     {
-        using var connection = _db.CreateConnection();
-        connection.Open();
-
-        var tableCheck = await CheckAgvInboxTablesAsync(connection, cancellationToken);
-        if (!tableCheck.IsValid)
-        {
-            _logger.LogWarning("跳过AGV指令收件箱处理：{Reason}", tableCheck.ErrorMessage);
-            return 0;
-        }
-
-        var inboxList = (await connection.QueryAsync<InboxHeader>(new CommandDefinition(
-            @"SELECT TOP (@TopN) ID, TaskNumber, Priority
-              FROM RCS_AgvCommandInbox WITH (READPAST)
-              WHERE ProcessStatus = 0
-              ORDER BY ID ASC;",
-            new { TopN = batchSize },
-            cancellationToken: cancellationToken))).ToList();
-
-        foreach (var inbox in inboxList)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await ProcessSingleInboxAsync(connection, inbox, cancellationToken);
-        }
-
-        return inboxList.Count;
-    }
-
-    private async Task ProcessSingleInboxAsync(System.Data.IDbConnection connection, InboxHeader inbox, CancellationToken cancellationToken)
-    {
-        System.Data.IDbTransaction? transaction = null;
-        try
-        {
-            connection.Open();
-            transaction = connection.BeginTransaction();
-
-            var items = (await connection.QueryAsync<InboxItem>(new CommandDefinition(
-                @"SELECT ID, InboxId, Seq, PalletNumber, BinNumber, FromStation, ToStation, TaskType
-                  FROM RCS_AgvCommandInboxItems
-                  WHERE InboxId = @InboxId
-                  ORDER BY Seq ASC;",
-                new { InboxId = inbox.ID },
-                transaction,
-                cancellationToken: cancellationToken))).ToList();
-
-            if (items.Count == 0)
-            {
-                await MarkInboxFailedAsync(connection, inbox.ID, "未找到items明细", transaction, cancellationToken);
-                transaction.Commit();
-                return;
-            }
-
-            var existingCount = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
-                @"SELECT COUNT(1)
-                  FROM RCS_UserTasks
-                  WHERE taskGroupNo = @TaskGroupNo
-                    AND IsCancelled = 0;",
-                new { TaskGroupNo = inbox.TaskNumber },
-                transaction,
-                cancellationToken: cancellationToken));
-
-            if (existingCount == items.Count)
-            {
-                await MarkInboxSuccessAsync(connection, inbox.ID, transaction, cancellationToken);
-                transaction.Commit();
-                return;
-            }
-
-            if (existingCount > 0)
-            {
-                await MarkInboxFailedAsync(connection, inbox.ID, "RCS_UserTasks中已存在同组任务且数量不一致", transaction, cancellationToken);
-                transaction.Commit();
-                return;
-            }
-
-            const string insertTaskSql = @"
-INSERT INTO RCS_UserTasks
-(
-    taskStatus,
-    executed,
-    creatTime,
-    requestCode,
-    taskGroupNo,
-    taskType,
-    priority,
-    robotCode,
-    sourcePosition,
-    targetPosition,
-    palletNo,
-    binNumber,
-    taskCode,
-    IsCancelled,
-    remarks
-)
-VALUES
-(
-    @taskStatus,
-    @executed,
-    @creatTime,
-    @requestCode,
-    @taskGroupNo,
-    @taskType,
-    @priority,
-    @robotCode,
-    @sourcePosition,
-    @targetPosition,
-    @palletNo,
-    @binNumber,
-    @taskCode,
-    @IsCancelled,
-    @remarks
-);";
-
-            var now = DateTime.Now;
-            foreach (var item in items)
-            {
-                var requestCode = $"{inbox.TaskNumber}_{item.Seq:D3}";
-                await connection.ExecuteAsync(new CommandDefinition(
-                    insertTaskSql,
-                    new
-                    {
-                        taskStatus = 0,
-                        executed = false,
-                        creatTime = now,
-                        requestCode,
-                        taskGroupNo = inbox.TaskNumber,
-                        taskType = item.TaskType,
-                        priority = inbox.Priority,
-                        robotCode = "0",
-                        sourcePosition = item.FromStation,
-                        targetPosition = item.ToStation,
-                        palletNo = item.PalletNumber,
-                        binNumber = item.BinNumber,
-                        taskCode = requestCode,
-                        IsCancelled = false,
-                        remarks = "MES->AGV(Inbox)"
-                    },
-                    transaction,
-                    cancellationToken: cancellationToken));
-            }
-
-            await MarkInboxSuccessAsync(connection, inbox.ID, transaction, cancellationToken);
-            transaction.Commit();
-        }
-        catch (Exception ex)
-        {
-            transaction?.Rollback();
-            _logger.LogError(ex, "消费AGV指令收件箱失败，InboxId={InboxId}", inbox.ID);
-            await connection.ExecuteAsync(new CommandDefinition(
-                @"UPDATE RCS_AgvCommandInbox
-                  SET ProcessStatus = 2,
-                      ErrorMsg = @ErrorMsg,
-                      UpdateTime = @UpdateTime
-                  WHERE ID = @ID;",
-                new { ID = inbox.ID, ErrorMsg = $"处理异常: {ex.Message}", UpdateTime = DateTime.Now },
-                cancellationToken: cancellationToken));
-        }
-        finally
-        {
-            if (connection.State == System.Data.ConnectionState.Open)
-            {
-                connection.Close();
-            }
-        }
+        return "ReceiveAgvCommand -> ReceiveAndCreateUserTasksAsync -> BuildMesTaskDraftByTaskTypeAsync -> IUserTaskCreationService.CreateTaskAsync";
     }
 
     private static Task MarkInboxSuccessAsync(System.Data.IDbConnection connection, int id, System.Data.IDbTransaction transaction, CancellationToken cancellationToken)
@@ -495,6 +452,154 @@ VALUES
             new { ID = id, ErrorMsg = errorMsg, UpdateTime = DateTime.Now },
             transaction,
             cancellationToken: cancellationToken));
+    }
+
+    private static Task MarkInboxItemSuccessAsync(
+        System.Data.IDbConnection connection,
+        int id,
+        string requestCode,
+        int? userTaskId,
+        int? taskStatus,
+        System.Data.IDbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        return connection.ExecuteAsync(new CommandDefinition(
+            @"UPDATE RCS_AgvCommandInboxItems
+              SET RequestCode = @RequestCode,
+                  ProcessStatus = 1,
+                  TaskStatus = @TaskStatus,
+                  ErrorMsg = '',
+                  UserTaskId = @UserTaskId,
+                  ProcessTime = @ProcessTime,
+                  UpdateTime = @UpdateTime
+              WHERE ID = @ID;",
+            new
+            {
+                ID = id,
+                RequestCode = requestCode,
+                UserTaskId = userTaskId,
+                TaskStatus = taskStatus,
+                ProcessTime = DateTime.Now,
+                UpdateTime = DateTime.Now
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+    }
+
+    private static Task MarkInboxItemFailedAsync(
+        System.Data.IDbConnection connection,
+        int id,
+        string requestCode,
+        string errorMsg,
+        System.Data.IDbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        return connection.ExecuteAsync(new CommandDefinition(
+            @"UPDATE RCS_AgvCommandInboxItems
+              SET RequestCode = @RequestCode,
+                  ProcessStatus = 2,
+                  TaskStatus = NULL,
+                  ErrorMsg = @ErrorMsg,
+                  UpdateTime = @UpdateTime
+              WHERE ID = @ID;",
+            new
+            {
+                ID = id,
+                RequestCode = requestCode,
+                ErrorMsg = errorMsg,
+                UpdateTime = DateTime.Now
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+    }
+
+    private static Task MarkInboxItemSuccessByInboxAsync(
+        System.Data.IDbConnection connection,
+        int inboxId,
+        int seq,
+        string requestCode,
+        int? userTaskId,
+        int? taskStatus,
+        System.Data.IDbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        return connection.ExecuteAsync(new CommandDefinition(
+            @"UPDATE RCS_AgvCommandInboxItems
+              SET RequestCode = @RequestCode,
+                  ProcessStatus = 1,
+                  TaskStatus = @TaskStatus,
+                  ErrorMsg = '',
+                  UserTaskId = @UserTaskId,
+                  ProcessTime = @ProcessTime,
+                  UpdateTime = @UpdateTime
+              WHERE InboxId = @InboxId AND Seq = @Seq;",
+            new
+            {
+                InboxId = inboxId,
+                Seq = seq,
+                RequestCode = requestCode,
+                UserTaskId = userTaskId,
+                TaskStatus = taskStatus,
+                ProcessTime = DateTime.Now,
+                UpdateTime = DateTime.Now
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+    }
+
+    private static Task MarkInboxItemFailedByInboxAsync(
+        System.Data.IDbConnection connection,
+        int inboxId,
+        int seq,
+        string requestCode,
+        string errorMsg,
+        System.Data.IDbTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        return connection.ExecuteAsync(new CommandDefinition(
+            @"UPDATE RCS_AgvCommandInboxItems
+              SET RequestCode = @RequestCode,
+                  ProcessStatus = 2,
+                  TaskStatus = NULL,
+                  ErrorMsg = @ErrorMsg,
+                  UpdateTime = @UpdateTime
+              WHERE InboxId = @InboxId AND Seq = @Seq;",
+            new
+            {
+                InboxId = inboxId,
+                Seq = seq,
+                RequestCode = requestCode,
+                ErrorMsg = errorMsg,
+                UpdateTime = DateTime.Now
+            },
+            transaction,
+            cancellationToken: cancellationToken));
+    }
+
+    /// <summary>
+    /// 统一构造 MES 收件箱明细对应的任务创建请求。
+    /// Why: 收件箱消费者只负责“逐条消费和回写状态”，而不同任务类型的起点/终点解析规则统一交给
+    /// <c>UserTaskCreationService.BuildExternalTaskDraftAsync</c> 处理；这样后续现场主要调整“如何插入 RCS_UserTasks”时，
+    /// 只需要聚焦统一任务创建服务，不需要回到收件箱消费循环里逐段排查。
+    /// </summary>
+    private static UserTaskCreationRequest BuildUnifiedMesTaskCreationRequest(InboxHeader inbox, InboxItem item, string requestCode)
+    {
+        return new UserTaskCreationRequest
+        {
+            SourceType = UserTaskSourceType.Mes,
+            RequestCode = requestCode,
+            TaskGroupNo = inbox.TaskNumber,
+            Priority = inbox.Priority,
+            SourcePosition = item.FromStation,
+            TargetPosition = item.ToStation,
+            PalletNumber = item.PalletNumber,
+            BinNumber = item.BinNumber,
+            ExternalTaskType = item.TaskType,
+            Remarks = "MES inbox task",
+            ValidateLocationExistence = false,
+            ValidateReachableTarget = false,
+            LockLocations = false
+        };
     }
 
     /// <summary>
@@ -546,6 +651,11 @@ VALUES
         public string? FromStation { get; set; }
         public string ToStation { get; set; } = string.Empty;
         public int TaskType { get; set; }
+        public string? RequestCode { get; set; }
+        public int ProcessStatus { get; set; }
+        public int? TaskStatus { get; set; }
+        public string? ErrorMsg { get; set; }
+        public int? UserTaskId { get; set; }
     }
 
     private sealed class TableExistsResult

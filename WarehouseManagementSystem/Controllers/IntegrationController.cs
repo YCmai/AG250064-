@@ -202,6 +202,9 @@ namespace WarehouseManagementSystem.Controllers
         /// <summary>
         /// MES 下发 AGV 指令。
         /// POST /api/ApiTask/agvcommand
+        /// 链路说明：
+        /// 1. 当前接口负责校验、写入 AGV 收件箱主子表，并同步拆分生成 <c>RCS_UserTasks</c>。
+        /// 2. 不同任务类型的起点/终点与内部任务类型规则统一归口到 <c>BuildMesTaskDraftByTaskTypeAsync</c>。
         /// </summary>
         [HttpPost("/api/ApiTask/agvcommand")]
         [HttpPost("agv/commands")]
@@ -216,11 +219,14 @@ namespace WarehouseManagementSystem.Controllers
                 return Ok(AgvIntegrationResponse.Fail(errorMessage));
             }
 
+            var dispatchFlow = _agvIntegrationService.DescribeAgvCommandDispatchFlow();
+
             _logger.LogInformation(
-                "收到MES下发AGV指令，TaskNumber={TaskNumber}, Priority={Priority}, ItemCount={ItemCount}, Items={Items}, Payload={Payload}, ReceiveTime={ReceiveTime}",
+                "收到MES下发AGV指令，TaskNumber={TaskNumber}, Priority={Priority}, ItemCount={ItemCount}, DispatchFlow={DispatchFlow}, Items={Items}, Payload={Payload}, ReceiveTime={ReceiveTime}",
                 request.TaskNumber,
                 request.Priority,
                 request.Items.Count,
+                dispatchFlow,
                 string.Join(" | ", request.Items.Select(x =>
                     $"seq={x.Seq},taskType={x.TaskType},from={x.FromStation},to={x.ToStation},pallet={x.PalletNumber},bin={x.BinNumber}")),
                 JsonSerializer.Serialize(request, new JsonSerializerOptions
@@ -229,7 +235,7 @@ namespace WarehouseManagementSystem.Controllers
                 }),
                 DateTime.Now.ToString(DateTimeFormat));
 
-            var persistResult = await _agvIntegrationService.EnqueueAgvCommandAsync(request, cancellationToken);
+            var persistResult = await _agvIntegrationService.ReceiveAndCreateUserTasksAsync(request, cancellationToken);
             return persistResult.Status switch
             {
                 AgvPersistStatus.Success => Ok(AgvIntegrationResponse.Success()),

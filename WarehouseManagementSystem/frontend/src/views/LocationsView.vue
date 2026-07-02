@@ -5,7 +5,7 @@
       <a-input
         v-model:value="searchText"
         :placeholder="$t('location.searchPlaceholder')"
-        style="width: 200px"
+        style="width: 220px"
       />
       <a-button type="primary" @click="handleSearch">{{ $t('common.search') }}</a-button>
       <a-button type="primary" @click="handleCreateLocation">
@@ -54,7 +54,7 @@
           locationStore.setPageSize(size)
           fetchLocations()
         },
-        onShowSizeChange: (current, size) => {
+        onShowSizeChange: (_current, size) => {
           locationStore.setPage(1)
           locationStore.setPageSize(size)
           fetchLocations()
@@ -70,7 +70,7 @@
         selectedRowKeys: selectedIds,
         onChange: handleSelectionChange,
       }"
-      :scroll="{ x: 2000, y: 'calc(100vh - 280px)' }"
+      :scroll="{ x: 2200, y: 'calc(100vh - 280px)' }"
       size="middle"
     >
       <template #bodyCell="{ column, record }">
@@ -144,24 +144,24 @@
     <LocationImportPreviewModal
       v-model="showImportPreview"
       :preview-data="importPreviewData"
+      :importing="isImporting"
       @confirm="handleConfirmImport"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useLocationStore } from '@/stores/location'
-import { Location } from '@/services/location'
-import locationService from '@/services/location'
-import LocationDetailModal from '@/components/LocationDetailModal.vue'
-import BatchOperationToolbar from '@/components/BatchOperationToolbar.vue'
-import LocationImportPreviewModal from '@/components/LocationImportPreviewModal.vue'
-import { PlusOutlined, UploadOutlined, DownloadOutlined } from '@ant-design/icons-vue'
+import { DownloadOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons-vue'
 import { message, Modal } from 'ant-design-vue'
 import * as XLSX from 'xlsx'
 import { useI18n } from 'vue-i18n'
+import { useLocationStore } from '@/stores/location'
+import locationService, { Location } from '@/services/location'
+import BatchOperationToolbar from '@/components/BatchOperationToolbar.vue'
+import LocationDetailModal from '@/components/LocationDetailModal.vue'
+import LocationImportPreviewModal from '@/components/LocationImportPreviewModal.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -171,7 +171,8 @@ const showDetailModal = ref(false)
 const selectedLocation = ref<Location | null>(null)
 const selectedIds = ref<number[]>([])
 const showImportPreview = ref(false)
-const importPreviewData = ref<any[]>([])
+const isImporting = ref(false)
+const importPreviewData = ref<Array<{ rowNumber: number; data: Partial<Location>; errors: string[] }>>([])
 
 const columns = computed(() => [
   {
@@ -192,6 +193,24 @@ const columns = computed(() => [
     dataIndex: 'group',
     key: 'group',
     width: 100,
+  },
+  {
+    title: t('location.laneCode'),
+    dataIndex: 'laneCode',
+    key: 'laneCode',
+    width: 100,
+  },
+  {
+    title: t('location.depthIndex'),
+    dataIndex: 'depthIndex',
+    key: 'depthIndex',
+    width: 100,
+  },
+  {
+    title: t('location.waitingNode'),
+    dataIndex: 'wattingNode',
+    key: 'wattingNode',
+    width: 140,
   },
   {
     title: t('location.isEmpty'),
@@ -254,18 +273,6 @@ const columns = computed(() => [
     width: 100,
   },
   {
-    title: t('location.depth'),
-    dataIndex: 'depth',
-    key: 'depth',
-    width: 80,
-  },
-  {
-    title: t('location.waitingNode'),
-    dataIndex: 'wattingNode',
-    key: 'wattingNode',
-    width: 100,
-  },
-  {
     title: t('common.operation'),
     key: 'action',
     width: 360,
@@ -285,6 +292,7 @@ const fetchLocations = async () => {
       locationStore.page,
       locationStore.pageSize
     )
+
     if (response.success && response.data) {
       locationStore.setLocations(response.data.items, response.data.total)
     } else {
@@ -350,7 +358,6 @@ const handleToggleLock = async (record: Location) => {
     const response = await locationService.toggleLock(record.id, !record.lock)
     if (response.success) {
       message.success(response.message || t('common.success'))
-      // 立即刷新数据
       await fetchLocations()
     } else {
       message.error(response.message || t('common.fail'))
@@ -376,7 +383,7 @@ const handleToggleEnabled = async (record: Location) => {
 
 const handleDeleteLocation = (record: Location) => {
   Modal.confirm({
-    title: t('location.confirmDelete'),
+    title: t('location.deleteConfirm'),
     content: t('location.confirmDeleteContent', { name: record.name, remark: record.nodeRemark }),
     okText: t('common.delete'),
     cancelText: t('common.cancel'),
@@ -386,7 +393,6 @@ const handleDeleteLocation = (record: Location) => {
         const response = await locationService.deleteLocation(record.id)
         if (response.success) {
           message.success(response.message || t('common.success'))
-          // 立即刷新数据
           await fetchLocations()
         } else {
           message.error(response.message || t('common.fail'))
@@ -398,6 +404,36 @@ const handleDeleteLocation = (record: Location) => {
   })
 }
 
+const buildImportErrors = (locationData: Partial<Location>, rowNumber: number) => {
+  const errors: string[] = []
+
+  if (!locationData.name) {
+    errors.push(t('location.nameRequired'))
+  }
+
+  if (!locationData.nodeRemark) {
+    errors.push(t('location.nodeRemarkRequired'))
+  }
+
+  if (!locationData.group) {
+    errors.push(t('location.groupRequired'))
+  }
+
+  if (!locationData.laneCode) {
+    errors.push(t('location.laneCodeRequired'))
+  }
+
+  if (!locationData.depthIndex || locationData.depthIndex <= 0) {
+    errors.push(t('location.depthIndexPositive'))
+  }
+
+  return {
+    rowNumber,
+    data: locationData,
+    errors,
+  }
+}
+
 const handleBeforeUpload = (file: File) => {
   const reader = new FileReader()
   reader.onload = async (e) => {
@@ -406,140 +442,135 @@ const handleBeforeUpload = (file: File) => {
       const workbook = XLSX.read(data, { type: 'array' })
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
       const jsonData: any[] = XLSX.utils.sheet_to_json(firstSheet)
-      
+
       if (jsonData.length === 0) {
         message.error(t('common.fail'))
         return
       }
-      
-      // 用于检测重复的节点备注
+
       const nodeRemarkSet = new Set<string>()
       const duplicateNodeRemarks = new Set<string>()
-      
-      // Helper to get value from either English or Chinese column header
-      const getVal = (row: any, enKey: string, zhKey: string) => {
-        return row[enKey] !== undefined ? row[enKey] : row[zhKey];
-      }
+      const getVal = (row: any, enKey: string, zhKey: string) => (row[enKey] !== undefined ? row[enKey] : row[zhKey])
 
-      // 验证并转换数据
       const previewData = jsonData.map((row: any, index: number) => {
-        const errors: string[] = []
-        
-        const mapNodeVal = getVal(row, 'Map Node', '地图节点');
-        const nodeRemarkVal = getVal(row, 'Node Remark', '节点备注');
-        const groupVal = getVal(row, 'Group', '分组');
-        const waitingNodeVal = getVal(row, 'Waiting Node', '挂作点');
-        const liftingHeightVal = getVal(row, 'Lifting Height', '举升高度');
-        const unloadHeightVal = getVal(row, 'Unload Height', '卸载高度');
-        const depthVal = getVal(row, 'Depth', '储位深度');
-
-        // 验证必填字段
-        if (!mapNodeVal || String(mapNodeVal).trim() === '') {
-          errors.push(t('location.nameRequired'))
-        }
-        
-        const nodeRemark = String(nodeRemarkVal || '').trim()
-        if (!nodeRemark) {
-          errors.push(t('location.nodeRemarkRequired'))
-        } else {
-          // 检查节点备注是否重复
+        const nodeRemark = String(getVal(row, 'Node Remark', '节点备注') || '').trim()
+        if (nodeRemark) {
           if (nodeRemarkSet.has(nodeRemark)) {
             duplicateNodeRemarks.add(nodeRemark)
-            errors.push(t('location.nodeRemark') + ' ' + t('common.fail')) // Duplicate
           } else {
             nodeRemarkSet.add(nodeRemark)
           }
         }
-        
-        if (!groupVal || String(groupVal).trim() === '') {
-          errors.push(t('location.groupRequired'))
-        }
-        
-        // 转换数据
-        const locationData = {
-          name: String(mapNodeVal || '').trim(),
-          nodeRemark: nodeRemark,
-          group: String(groupVal || '').trim(),
-          wattingNode: String(waitingNodeVal || '').trim(),
-          liftingHeight: parseInt(liftingHeightVal) || 0,
-          unloadHeight: parseInt(unloadHeightVal) || 0,
-          depth: parseInt(depthVal) || 0,
+
+        const locationData: Partial<Location> = {
+          name: String(getVal(row, 'Map Node', '地图节点') || '').trim(),
+          nodeRemark,
+          group: String(getVal(row, 'Group', '分组') || '').trim(),
+          laneCode: String(getVal(row, 'Lane Code', '库道编号') || '').trim(),
+          depthIndex: parseInt(String(getVal(row, 'Depth Index', '深度序号') || '0'), 10) || 0,
+          wattingNode: String(getVal(row, 'Signal Request Point', '信号请求点') || '').trim(),
+          liftingHeight: parseInt(String(getVal(row, 'Lifting Height', '举升高度') || '0'), 10) || 0,
+          unloadHeight: parseInt(String(getVal(row, 'Unload Height', '卸载高度') || '0'), 10) || 0,
           lock: false,
           enabled: true,
-          materialCode: null,
+          materialCode: null as any,
           palletID: '0',
           weight: '0',
           quanitity: '0',
-          entryDate: null,
+          entryDate: null as any,
         }
-        
-        return {
-          rowNumber: index + 2, // Excel行号从2开始（第1行是表头）
-          data: locationData,
-          errors: errors,
-        }
+
+        const previewItem = buildImportErrors(locationData, index + 2)
+        return previewItem
       })
-      
-      // 标记所有重复的节点备注
+
       if (duplicateNodeRemarks.size > 0) {
-        previewData.forEach(item => {
-          if (duplicateNodeRemarks.has(item.data.nodeRemark) && 
-              !item.errors.some(e => e.includes(t('location.nodeRemark')))) {
-            item.errors.push(t('location.nodeRemark') + ' ' + t('common.fail'))
+        previewData.forEach((item) => {
+          if (item.data.nodeRemark && duplicateNodeRemarks.has(item.data.nodeRemark)) {
+            item.errors.push(`${t('location.nodeRemark')} ${t('common.fail')}`)
           }
         })
       }
-      
-      // 显示预览对话框
+
       importPreviewData.value = previewData
       showImportPreview.value = true
-      
     } catch (error: any) {
-      message.error(t('common.fail') + ': ' + error.message)
+      message.error(`${t('common.fail')}: ${error.message}`)
     }
   }
+
   reader.readAsArrayBuffer(file)
-  return false // 阻止自动上传
+  return false
 }
 
-// ... (handleConfirmImport omitted for brevity as it doesn't need changes mostly) ...
+const handleConfirmImport = async (validData: Partial<Location>[]) => {
+  if (validData.length === 0) {
+    message.warning(t('location.invalidData'))
+    return
+  }
+
+  isImporting.value = true
+  try {
+    const response = await locationService.batchImport(validData)
+    if (response.success) {
+      const failCount = response.data?.failCount || 0
+      if (failCount > 0) {
+        const errors = response.data?.errors?.join('；') || response.message
+        message.warning(errors)
+      } else {
+        message.success(response.message || t('common.success'))
+      }
+
+      if (failCount === 0) {
+        showImportPreview.value = false
+        importPreviewData.value = []
+      }
+
+      await fetchLocations()
+    } else {
+      message.error(response.message || t('common.fail'))
+    }
+  } catch (error: any) {
+    message.error(error.message || t('common.fail'))
+  } finally {
+    isImporting.value = false
+  }
+}
 
 const handleExportTemplate = () => {
-  // 创建模板数据 - 根据实际需求
-  // Use computed keys for the template to support i18n
-  const row1 = {};
-  row1[t('location.mapNode')] = 'A001';
-  row1[t('location.nodeRemark')] = 'A-01';
-  row1[t('location.waitingNode')] = 'OP001';
-  row1[t('location.group')] = 'A';
-  row1[t('location.liftingHeight')] = 100;
-  row1[t('location.unloadHeight')] = 50;
-  row1[t('location.depth')] = 200;
+  const row1: Record<string, string | number> = {}
+  row1[t('location.mapNode')] = 'A001'
+  row1[t('location.nodeRemark')] = 'A-01'
+  row1[t('location.group')] = 'A'
+  row1[t('location.laneCode')] = 'A-L01'
+  row1[t('location.depthIndex')] = 1
+  row1[t('location.waitingNode')] = 'REQ001'
+  row1[t('location.liftingHeight')] = 100
+  row1[t('location.unloadHeight')] = 50
 
-  const row2 = {};
-  row2[t('location.mapNode')] = 'A002';
-  row2[t('location.nodeRemark')] = 'A-02';
-  row2[t('location.waitingNode')] = 'OP002';
-  row2[t('location.group')] = 'A';
-  row2[t('location.liftingHeight')] = 100;
-  row2[t('location.unloadHeight')] = 50;
-  row2[t('location.depth')] = 200;
+  const row2: Record<string, string | number> = {}
+  row2[t('location.mapNode')] = 'A002'
+  row2[t('location.nodeRemark')] = 'A-02'
+  row2[t('location.group')] = 'A'
+  row2[t('location.laneCode')] = 'A-L01'
+  row2[t('location.depthIndex')] = 2
+  row2[t('location.waitingNode')] = 'REQ002'
+  row2[t('location.liftingHeight')] = 100
+  row2[t('location.unloadHeight')] = 50
 
-  const template = [row1, row2];
-  
+  const template = [row1, row2]
   const ws = XLSX.utils.json_to_sheet(template)
-  
-  // 设置列宽
   ws['!cols'] = [
-    { wch: 12 }, // mapNode
-    { wch: 15 }, // nodeRemark
-    { wch: 12 }, // waitingNode
-    { wch: 10 }, // group
-    { wch: 12 }, // liftingHeight
-    { wch: 12 }, // unloadHeight
-    { wch: 12 }, // depth
+    { wch: 12 },
+    { wch: 15 },
+    { wch: 10 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 16 },
+    { wch: 12 },
+    { wch: 12 },
   ]
-  
+
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, t('location.title'))
   XLSX.writeFile(wb, `LocationTemplate_${new Date().getTime()}.xlsx`)

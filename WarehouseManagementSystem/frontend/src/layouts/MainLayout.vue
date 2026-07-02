@@ -58,6 +58,9 @@
           <a-menu-item key="/setting" v-if="authStore.hasPermission('SETTINGS')">
             {{ t('menu.settings') }}
           </a-menu-item>
+          <a-menu-item key="/logs" v-if="authStore.hasPermission('SETTINGS')">
+            {{ t('menu.logCenter') }}
+          </a-menu-item>
         </a-sub-menu>
       </a-menu>
     </a-layout-sider>

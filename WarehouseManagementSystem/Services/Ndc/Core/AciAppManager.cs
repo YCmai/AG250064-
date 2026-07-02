@@ -443,7 +443,25 @@ public class AciAppManager : IDisposable
     /// </summary>
     public AciCommandData SendOrderInitial(AciCommandCallBack? callback, int key, int trp, int pri, int[] vals)
     {
-        return AciClient.SendOrderInitial(callback, key, trp, pri, vals);
+        // 下发前判断是否握手写成功2
+        var readCmd = SendGlobalParamRead(null, 0, 1);
+        if (readCmd.Wait(2000))
+        {
+            if (TryGetHandshakeStatus(readCmd, out var paramValue) && paramValue == 2)
+            {
+                return AciClient.SendOrderInitial(callback, key, trp, pri, vals);
+            }
+
+            _logger.LogWarning("下发任务前检查握手状态不为2 (当前值: {ParamValue})，跳过下发 key: {Key}", paramValue, key);
+        }
+        else
+        {
+            _logger.LogWarning("下发任务前检查握手状态超时，跳过下发 key: {Key}", key);
+        }
+
+        var errData = new AciCommandData(null!, callback!);
+        errData.Cancel(AciCommandErrorCode.DataError);
+        return errData;
     }
 
     /// <summary>

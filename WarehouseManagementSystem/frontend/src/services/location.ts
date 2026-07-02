@@ -12,12 +12,31 @@ export interface Location {
   entryDate: string
   liftingHeight: number
   unloadHeight: number
-  depth: number
+  laneCode: string
+  depthIndex: number
   wattingNode: string
   isEmpty: boolean
   lock: boolean
   enabled: boolean
   createdTime: string
+}
+
+export interface RecommendedLocation {
+  id: number
+  name: string
+  nodeRemark: string
+  group: string
+  laneCode: string
+  depthIndex: number
+  wattingNode: string
+  isEmpty: boolean
+  isLocked: boolean
+  enabled: boolean
+  materialCode: string | null
+  palletID: string | null
+  isReachableTarget: boolean
+  isRecommendedTarget: boolean
+  recommendationOrder: number | null
 }
 
 export interface PaginatedResponse<T> {
@@ -91,6 +110,14 @@ const locationService = {
       '/location/batch/import',
       { locations }
     ),
+
+  getRecommendedTargets: (excludeLocationId?: number) =>
+    api.get<ApiResponse<RecommendedLocation[]>>('/location/recommended-targets', {
+      params: excludeLocationId ? { excludeLocationId } : {},
+    }),
+
+  getGroups: () =>
+    api.get<ApiResponse<string[]>>('/location/groups'),
 }
 
 export default locationService

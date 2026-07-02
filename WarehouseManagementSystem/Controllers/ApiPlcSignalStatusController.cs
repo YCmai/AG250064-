@@ -157,6 +157,11 @@ namespace WarehouseManagementSystem.Controllers
                 await _plcSignalService.ResetPlcSignalAsync(request.SignalId);
                 return Ok(ApiResponseHelper.Success("PLC信号重置成功"));
             }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "PLC信号重置被拒绝: SignalId={SignalId}", request.SignalId);
+                return BadRequest(ApiResponseHelper.Failure(ex.Message));
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, $"重置PLC信号失败: SignalId={request.SignalId}");
@@ -181,6 +186,11 @@ namespace WarehouseManagementSystem.Controllers
                 if (signal == null)
                 {
                     return NotFound(ApiResponseHelper.Failure($"信号ID {request.SignalId} 不存在"));
+                }
+
+                if (!string.Equals(signal.Writer, IPlcSignalService.ManualWritableWriter, StringComparison.OrdinalIgnoreCase))
+                {
+                    return BadRequest(ApiResponseHelper.Failure("仅允许对“中控写PLC”信号执行写入操作。"));
                 }
 
                 // 处理值

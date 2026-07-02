@@ -149,6 +149,31 @@ namespace WarehouseManagementSystem.Controllers
             }
         }
 
+        [HttpPost("initialize-default-db1")]
+        /// <summary>
+        /// 初始化 192.168.0.100 的 DB1 标准 PLC 设备与信号模板。
+        /// 该接口用于现场快速导入标准点位，避免人工逐条录入造成偏移量或权限配置错误。
+        /// </summary>
+        public async Task<IActionResult> InitializeDefaultDb1Signals([FromBody] PlcDeviceInitializationRequest? request = null)
+        {
+            try
+            {
+                var initializeRequest = request ?? new PlcDeviceInitializationRequest();
+                var result = await _plcSignalService.InitializeDeviceSignalsAsync(initializeRequest);
+                return Ok(new
+                {
+                    success = true,
+                    data = result,
+                    message = "PLC DB1 标准点位初始化成功"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "初始化 PLC DB1 标准点位失败");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
         [HttpPut("{id}")]
         /// <summary>
         /// 更新 PLC 设备信息。

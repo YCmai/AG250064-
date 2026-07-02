@@ -17,6 +17,8 @@ public interface IRcsUserTaskService
     Task<List<NdcUserTask>> GetPendingTasksAsync();
     Task<bool> ExistsUnfinishedTasksInGroupAsync(string taskGroupNo);
     Task UpdateAsync(NdcUserTask entity);
+    Task SyncInboxItemTaskStatusAsync(string requestCode, int taskStatus);
+    Task<int> RepairInboxItemTaskStatusesAsync();
 }
 
 /// <summary>
@@ -207,6 +209,64 @@ public sealed class RcsUserTaskService : RcsDapperDataServiceBase, IRcsUserTaskS
     public Task UpdateAsync(NdcUserTask entity)
     {
         return UpdateEntityAsync("RCS_UserTasks", "ID", entity);
+    }
+
+    public async Task SyncInboxItemTaskStatusAsync(string requestCode, int taskStatus)
+    {
+        if (string.IsNullOrWhiteSpace(requestCode))
+        {
+            return;
+        }
+
+        const string sql = @"
+        UPDATE [RCS_AgvCommandInboxItems]
+        SET [TaskStatus] = @TaskStatus,
+            [UpdateTime] = @UpdateTime
+        WHERE [RequestCode] = @RequestCode;";
+
+        using var connection = CreateConnection();
+        await connection.ExecuteAsync(sql, new
+        {
+            RequestCode = requestCode.Trim(),
+            TaskStatus = taskStatus,
+            UpdateTime = DateTime.Now
+        });
+    }
+
+    /// <summary>
+    /// Why: 指令明细状态除了依赖实时流转同步，还需要有兜底补偿。
+    /// 例如任务被其他链路直接改成终态、历史数据在脚本补字段前已生成、或后台服务重启错过某次状态跳变时，
+    /// 都可能出现 <c>RCS_UserTasks.taskStatus</c> 与 <c>RCS_AgvCommandInboxItems.TaskStatus</c> 不一致。
+    /// 这里统一按 <c>UserTaskId</c> 优先、<c>RequestCode</c> 兜底回写，保证页面看到的是最终真实执行状态。
+    /// </summary>
+    public async Task<int> RepairInboxItemTaskStatusesAsync()
+    {
+        const string syncByUserTaskIdSql = @"
+        UPDATE i
+        SET i.[TaskStatus] = t.[taskStatus],
+            i.[UpdateTime] = @UpdateTime
+        FROM [RCS_AgvCommandInboxItems] i
+        INNER JOIN [RCS_UserTasks] t ON t.[ID] = i.[UserTaskId]
+        WHERE i.[UserTaskId] IS NOT NULL
+          AND (i.[TaskStatus] IS NULL OR i.[TaskStatus] <> t.[taskStatus]);";
+
+        const string syncByRequestCodeSql = @"
+        UPDATE i
+        SET i.[TaskStatus] = t.[taskStatus],
+            i.[UserTaskId] = t.[ID],
+            i.[UpdateTime] = @UpdateTime
+        FROM [RCS_AgvCommandInboxItems] i
+        INNER JOIN [RCS_UserTasks] t ON t.[requestCode] = i.[RequestCode]
+        WHERE i.[UserTaskId] IS NULL
+          AND i.[RequestCode] IS NOT NULL
+          AND LTRIM(RTRIM(i.[RequestCode])) <> ''
+          AND (i.[TaskStatus] IS NULL OR i.[TaskStatus] <> t.[taskStatus]);";
+
+        using var connection = CreateConnection();
+        var updateTime = DateTime.Now;
+        var affectedByUserTaskId = await connection.ExecuteAsync(syncByUserTaskIdSql, new { UpdateTime = updateTime });
+        var affectedByRequestCode = await connection.ExecuteAsync(syncByRequestCodeSql, new { UpdateTime = updateTime });
+        return affectedByUserTaskId + affectedByRequestCode;
     }
 
     public async Task<bool> ExistsUnfinishedTasksInGroupAsync(string taskGroupNo)

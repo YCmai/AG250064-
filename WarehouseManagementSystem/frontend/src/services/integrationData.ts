@@ -47,7 +47,14 @@ export interface AgvCommandInboxItemRow {
   fromStation?: string
   toStation: string
   taskType: number
+  requestCode?: string
+  processStatus: number
+  taskStatus?: number
+  errorMsg?: string
+  userTaskId?: number
   createTime: string
+  updateTime?: string
+  processTime?: string
 }
 
 export interface AgvOutboundQueueRow {

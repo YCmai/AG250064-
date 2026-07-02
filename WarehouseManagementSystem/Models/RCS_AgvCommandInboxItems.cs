@@ -21,6 +21,20 @@ public class RCS_AgvCommandInboxItems
     public string ToStation { get; set; } = string.Empty;
     /// <summary>任务类型（1运料/2取空托/3送空bin/4取满bin/5退料）。</summary>
     public int TaskType { get; set; }
+    /// <summary>对应 RCS_UserTasks 的 requestCode。</summary>
+    public string? RequestCode { get; set; }
+    /// <summary>明细处理状态（0待转换/1已生成任务/2转换失败）。</summary>
+    public int ProcessStatus { get; set; }
+    /// <summary>同步 RCS_UserTasks.taskStatus 的执行状态。</summary>
+    public int? TaskStatus { get; set; }
+    /// <summary>该条明细转换失败原因。</summary>
+    public string? ErrorMsg { get; set; }
+    /// <summary>成功转换后对应的 RCS_UserTasks 主键ID。</summary>
+    public int? UserTaskId { get; set; }
     /// <summary>创建时间。</summary>
     public DateTime CreateTime { get; set; }
+    /// <summary>最后更新时间。</summary>
+    public DateTime? UpdateTime { get; set; }
+    /// <summary>明细转任务完成时间。</summary>
+    public DateTime? ProcessTime { get; set; }
 }
